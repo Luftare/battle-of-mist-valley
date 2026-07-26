@@ -227,7 +227,22 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
   return {
     scene,
     setCombat: (active) => {
-      for (const unit of units) unit.setCombat(active);
+      for (const unit of units) {
+        unit.setCombat(active);
+        if (unit.kind === "helicopter") {
+          const enemyTank = active
+            ? units.find(
+                (u) =>
+                  u.kind === "tank" &&
+                  u.team !== unit.team &&
+                  !u.destroyed,
+              ) ?? null
+            : null;
+          unit.setAimTarget(enemyTank);
+        } else {
+          unit.setAimTarget(null);
+        }
+      }
     },
     toggleRedAdvance: () => {
       if (redAdvanceState === "home") {

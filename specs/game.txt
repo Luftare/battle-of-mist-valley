@@ -1,0 +1,25 @@
+It's an auto-battler.
+
+It's a square play area with 8 building slots at each side.
+
+Each building auto-spawns corresponding unit type, once every 15 sec.
+
+The units are spawned next to the building, towards the enemy side.
+
+Units start moving towards the enemy. They do some trivial path finding so that they don't walk at the trees and rocks but walk around them.
+
+Once enemy comes at shoot distance, they start shooting at the enemy.
+
+Units have hp and each hit reduces some hp.
+
+HP bar is shown above each unit.
+
+Units prioritize other enemy units, when no enemy unit is at shoot range, they shoot at buildings that are within range.
+
+Units may have movement target at which they move and upon reaching it, they stop.
+
+Tanks need to have their turret facing the enemy unit before they can shoot.
+
+Place random buildings in each slot.
+
+Destroyed units slowly sink in the ground and after 15 sec disappear.

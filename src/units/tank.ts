@@ -191,6 +191,7 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
         turretAngle = turret.rotation.y;
       }
     },
+    setAimTarget: () => {},
     setMoving: (active) => {
       if (destroyed) return;
       moving = active;

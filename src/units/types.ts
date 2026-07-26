@@ -7,11 +7,16 @@ export interface UnitHandle {
   kind: string;
   /**
    * Shots per second while in combat.
-   * Rifleman defaults to 2; tank fires at 0.5 once aimed. Helicopter unused for now.
+   * Rifleman 2; tank 0.5 once aimed; helicopter 0.2 (missile every 5s).
    */
   fireRateHz: number;
   /** Enter or leave combat animation (shooting pose / aim+fire). */
   setCombat: (active: boolean) => void;
+  /**
+   * Optional guided-fire target (helicopter missiles chase this).
+   * Other units ignore it.
+   */
+  setAimTarget: (target: UnitHandle | null) => void;
   /** Enable locomotion animation (walk / drive roll) while root is translated externally. */
   setMoving: (active: boolean) => void;
   /** Play randomized destruction animation (no-op if already destroyed). */

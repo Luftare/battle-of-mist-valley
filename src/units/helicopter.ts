@@ -1,6 +1,7 @@
 import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat } from "../theme/materials";
+import { createMissile, type MissileHandle } from "../fx/missile";
 import {
   makeDebris,
   randBurst,
@@ -11,11 +12,18 @@ import {
   type DebrisPiece,
 } from "./debris";
 import { createUnitShadow } from "./shadow";
-import type { UnitHandle } from "./types";
+import { approach, type UnitHandle } from "./types";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 
+/** Matches lab march speed for helicopters; missiles move 4× this. */
+const HELI_MOVE_SPEED = 1.3;
+const MISSILE_SPEED = HELI_MOVE_SPEED * 4;
+const HELI_FIRE_HZ = 0.2; // once every 5 seconds
+const CRUISE_Y = 2.7;
+
 /**
- * Blocky helicopter with spinning main + tail rotors and hover bob.
+ * Blocky helicopter with spinning rotors, hover bob, and guided missiles.
+ * Combat: fires a missile at the aim target every 5s; missile cruises then dives.
  * Destroy: main rotor flies off, tail boom snaps away, fuselage drops.
  */
 export function createHelicopter(
@@ -34,10 +42,14 @@ export function createHelicopter(
     specular: 0.6,
     emissive: 0.08,
   });
+  const flashMat = colorMat(scene, `${name}_flash`, "#ffc080", {
+    specular: 0,
+    emissive: 1,
+  });
 
   const body = new TransformNode(`${name}_body`, scene);
   body.parent = root;
-  body.position.y = 1.35;
+  body.position.y = CRUISE_Y;
 
   box(scene, `${name}_fuse`, { w: 0.55, h: 0.4, d: 1.2 }, new Vector3(0, 0, 0), bodyMat, body);
   box(scene, `${name}_nose`, { w: 0.45, h: 0.32, d: 0.35 }, new Vector3(0, 0.02, 0.65), glassMat, body);
@@ -55,6 +67,37 @@ export function createHelicopter(
   box(scene, `${name}_strutLR`, { w: 0.05, h: 0.22, d: 0.05 }, new Vector3(-0.28, -0.2, -0.25), metalMat, body);
   box(scene, `${name}_strutRF`, { w: 0.05, h: 0.22, d: 0.05 }, new Vector3(0.28, -0.2, 0.25), metalMat, body);
   box(scene, `${name}_strutRR`, { w: 0.05, h: 0.22, d: 0.05 }, new Vector3(0.28, -0.2, -0.25), metalMat, body);
+
+  // Stub wings / hardpoints with launch flashes
+  const hardpointL = new TransformNode(`${name}_hpL`, scene);
+  hardpointL.parent = body;
+  hardpointL.position = new Vector3(-0.42, -0.12, 0.05);
+  box(scene, `${name}_wingL`, { w: 0.45, h: 0.06, d: 0.22 }, new Vector3(-0.1, 0, 0), darkMat, hardpointL);
+  box(scene, `${name}_rackL`, { w: 0.12, h: 0.1, d: 0.35 }, new Vector3(-0.28, -0.08, 0), metalMat, hardpointL);
+  const flashL = box(
+    scene,
+    `${name}_flashL`,
+    { w: 0.14, h: 0.14, d: 0.22 },
+    new Vector3(-0.28, -0.08, -0.28),
+    flashMat,
+    hardpointL,
+  );
+  flashL.visibility = 0;
+
+  const hardpointR = new TransformNode(`${name}_hpR`, scene);
+  hardpointR.parent = body;
+  hardpointR.position = new Vector3(0.42, -0.12, 0.05);
+  box(scene, `${name}_wingR`, { w: 0.45, h: 0.06, d: 0.22 }, new Vector3(0.1, 0, 0), darkMat, hardpointR);
+  box(scene, `${name}_rackR`, { w: 0.12, h: 0.1, d: 0.35 }, new Vector3(0.28, -0.08, 0), metalMat, hardpointR);
+  const flashR = box(
+    scene,
+    `${name}_flashR`,
+    { w: 0.14, h: 0.14, d: 0.22 },
+    new Vector3(0.28, -0.08, -0.28),
+    flashMat,
+    hardpointR,
+  );
+  flashR.visibility = 0;
 
   const mainRotor = new TransformNode(`${name}_mainRotor`, scene);
   mainRotor.parent = body;
@@ -92,12 +135,23 @@ export function createHelicopter(
   const phase = Math.random() * Math.PI * 2;
   let mainSpin = phase;
   let tailSpin = phase * 1.3;
+  let combat = false;
   let moving = false;
   let destroyed = false;
+  let fireCooldown = 0;
+  let fireRateHz = HELI_FIRE_HZ;
+  let nextPod = 0;
+  let flashTimer = 0;
+  let flashSide: 0 | 1 = 0;
+  let launchKick = 0;
+  let aimTarget: UnitHandle | null = null;
+  const missiles: MissileHandle[] = [];
+  let missileSeq = 0;
   const debris: DebrisPiece[] = [];
   const fallVel = new Vector3();
   const fallSpin = new Vector3();
   let smoke: WreckSmokeHandle | null = null;
+  const launchWorld = new Vector3();
 
   const shadow = createUnitShadow(scene, name, root, {
     width: 0.28,
@@ -108,15 +162,67 @@ export function createHelicopter(
     getYaw: () => root.rotation.y + body.rotation.y,
   });
 
+  function launchMissile(): void {
+    if (!aimTarget || aimTarget.destroyed) return;
+
+    const pod = nextPod === 0 ? hardpointL : hardpointR;
+    flashSide = nextPod as 0 | 1;
+    nextPod = 1 - nextPod;
+
+    pod.computeWorldMatrix(true);
+    launchWorld.copyFrom(pod.getAbsolutePosition());
+    // Drop slightly below the rack so it clears the wing
+    launchWorld.y -= 0.08;
+
+    const cruiseY = body.getAbsolutePosition().y;
+    const targetRef = aimTarget;
+    const missile = createMissile(
+      scene,
+      `${name}_missile_${missileSeq++}`,
+      launchWorld.clone(),
+      () => {
+        if (!targetRef || targetRef.destroyed) return null;
+        return targetRef.root.getAbsolutePosition();
+      },
+      {
+        cruiseY,
+        speed: MISSILE_SPEED,
+        diveRange: 2.4,
+        hitRange: 0.5,
+      },
+    );
+    missiles.push(missile);
+    flashTimer = 0.14;
+    launchKick = 1;
+  }
+
   return {
     root,
     team,
     kind: "helicopter",
-    fireRateHz: 0,
+    get fireRateHz() {
+      return fireRateHz;
+    },
+    set fireRateHz(hz: number) {
+      fireRateHz = Math.max(0.05, hz);
+    },
     get destroyed() {
       return destroyed;
     },
-    setCombat: () => {},
+    setCombat: (active) => {
+      if (destroyed) return;
+      combat = active;
+      if (active) {
+        fireCooldown = 0.4 + Math.random() * 0.3;
+      } else {
+        flashTimer = 0;
+        flashL.visibility = 0;
+        flashR.visibility = 0;
+      }
+    },
+    setAimTarget: (target) => {
+      aimTarget = target;
+    },
     setMoving: (active) => {
       if (destroyed) return;
       moving = active;
@@ -124,7 +230,10 @@ export function createHelicopter(
     destroy: () => {
       if (destroyed) return;
       destroyed = true;
+      combat = false;
       moving = false;
+      flashL.visibility = 0;
+      flashR.visibility = 0;
 
       debris.push(
         makeDebris(
@@ -156,6 +265,14 @@ export function createHelicopter(
       smoke.start();
     },
     update: (dt, time) => {
+      // Missiles keep flying even after the heli is wrecked
+      for (let i = missiles.length - 1; i >= 0; i--) {
+        if (!missiles[i].update(dt)) {
+          missiles[i].dispose();
+          missiles.splice(i, 1);
+        }
+      }
+
       if (destroyed) {
         stepDebris(debris, dt, 0.05, 16);
         fallVel.y -= 14 * dt;
@@ -183,20 +300,54 @@ export function createHelicopter(
       }
 
       const t = time + phase;
-      body.position.y = 1.35 + Math.sin(t * 1.8) * 0.06 + Math.sin(t * 0.7) * 0.03;
-      body.rotation.z = Math.sin(t * 1.1) * 0.05;
-      body.rotation.x = Math.sin(t * 0.9) * 0.035 + (moving ? 0.12 : 0);
+      launchKick = approach(launchKick, 0, dt * 3.2);
+
+      body.position.y =
+        CRUISE_Y +
+        Math.sin(t * 1.8) * 0.06 +
+        Math.sin(t * 0.7) * 0.03 -
+        launchKick * 0.04;
+      body.rotation.z =
+        Math.sin(t * 1.1) * 0.05 +
+        (flashSide === 0 ? -1 : 1) * launchKick * 0.08;
+      body.rotation.x =
+        Math.sin(t * 0.9) * 0.035 +
+        (moving ? 0.12 : 0) -
+        launchKick * 0.06;
       body.rotation.y = Math.sin(t * 0.4) * 0.08;
 
-      const rotorMul = moving ? 1.35 : 1;
+      const rotorMul = moving || combat ? 1.35 : 1;
       mainSpin += dt * 5.5 * rotorMul;
       tailSpin += dt * 9 * rotorMul;
       mainRotor.rotation.y = mainSpin;
       tailRotor.rotation.x = tailSpin;
 
+      if (combat && aimTarget && !aimTarget.destroyed) {
+        fireCooldown -= dt;
+        if (fireCooldown <= 0) {
+          fireCooldown = 1 / fireRateHz;
+          launchMissile();
+        }
+      }
+
+      if (flashTimer > 0) {
+        flashTimer -= dt;
+        const vis = Math.min(1, flashTimer * 14);
+        const flash = flashSide === 0 ? flashL : flashR;
+        const other = flashSide === 0 ? flashR : flashL;
+        flash.visibility = vis;
+        flash.scaling.setAll(0.8 + Math.random() * 0.55);
+        other.visibility = 0;
+      } else {
+        flashL.visibility = 0;
+        flashR.visibility = 0;
+      }
+
       shadow.update();
     },
     dispose: () => {
+      for (const m of missiles) m.dispose();
+      missiles.length = 0;
       smoke?.dispose();
       for (const d of debris) d.node.dispose(false, true);
       shadow.dispose();

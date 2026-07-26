@@ -166,6 +166,7 @@ export function createRifleman(
         muzzleFlash.visibility = 0;
       }
     },
+    setAimTarget: () => {},
     setMoving: (active) => {
       if (destroyed) return;
       moving = active;
