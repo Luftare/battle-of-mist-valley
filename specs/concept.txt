@@ -1,0 +1,31 @@
+Auto battler 3d is a game where players build units that try countering each other. There's some paper/rock/scissors mechanism from dealing more damage to certain units as counter units, but also strategy-level countering such as fast rush and long-term end-game strategies based on building economy.
+
+It's built using babylon.js as the engine.
+
+The graphical style is "Blocky realism". So something like Minecraft/Valheim.
+
+Units are low-poly representations of the units and they are animated so that they look alive although the models are very simple.
+
+Before going into the game mechanics, let's get started by building the models and their animation and put them in a lab view where it's easy to review what the game looks like.
+
+Let's start with this kind of entities:
+
+Terrain: meadows style grass, trees, rocks
+
+Rifleman: very simple model made of blocks (one block for one limb, one block for head, another for helmet)
+
+Tank: rotating turret
+
+Helicopter: rotating rotors
+
+There are 2 teams: blue and red. Each unit has some details that indicate the team by color.
+
+Make the terrain and models dynamic, meaning that when things are idle, nothing is purely static but has some natural movement to make thigs look alive. Think of ways to make it look and feel such that invites to play the game and get into ecapism.
+
+We're doing this for the web, mobile-first.
+
+Start with the terrain with 2 instances of each unit: blue team and red team.
+
+It's an angled top-down view perspective.
+
+The entities are relatively small in the terrain. Think of birds eye view.
