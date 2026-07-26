@@ -2,6 +2,7 @@ import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import { createBlobShadow } from "../units/shadow";
+import { withBuildingCombat } from "./combat";
 import type { BuildingHandle } from "./types";
 
 /**
@@ -294,11 +295,12 @@ export function createHelipad(
     groundY: 0.03,
   });
 
-  return {
+  return withBuildingCombat({
     root,
     team,
     kind: "helipad",
-    update: (_dt, time) => {
+    spawns: "helicopter",
+    updateAlive: (_dt, time) => {
       const t = time + phase;
 
       beaconArm.rotation.y = t * 2.8;
@@ -325,9 +327,9 @@ export function createHelipad(
 
       shadow.update();
     },
-    dispose: () => {
+    disposeVisuals: () => {
       shadow.dispose();
       root.dispose(false, true);
     },
-  };
+  });
 }

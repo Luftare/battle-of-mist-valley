@@ -2,6 +2,7 @@ import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import { createBlobShadow } from "../units/shadow";
+import { withBuildingCombat } from "./combat";
 import type { BuildingHandle } from "./types";
 
 /**
@@ -292,15 +293,15 @@ export function createFactory(
     groundY: 0.04,
   });
 
-  return {
+  return withBuildingCombat({
     root,
     team,
     kind: "factory",
-    update: (_dt, time) => {
+    spawns: "tank",
+    updateAlive: (_dt, time) => {
       const t = time + phase;
       gear.rotation.z = t * 1.15;
 
-      // Conveyor crates loop along the belt
       for (let i = 0; i < crates.length; i++) {
         const cycle = ((t * 0.35 + i / crates.length) % 1 + 1) % 1;
         crates[i].position.x = -0.65 + cycle * 1.3;
@@ -320,16 +321,13 @@ export function createFactory(
         }
       }
 
-      // Soft blink on the roof lamp
       const blink = 0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 3.2));
-      lampMat.emissiveColor.copyFrom(
-        lampMat.diffuseColor.scale(blink),
-      );
+      lampMat.emissiveColor.copyFrom(lampMat.diffuseColor.scale(blink));
       shadow.update();
     },
-    dispose: () => {
+    disposeVisuals: () => {
       shadow.dispose();
       root.dispose(false, true);
     },
-  };
+  });
 }

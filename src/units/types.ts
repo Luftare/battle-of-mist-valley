@@ -1,7 +1,8 @@
-import { Scene, TransformNode } from "@babylonjs/core";
+import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
 import type { Team } from "../theme/colors";
+import type { CombatEntity } from "../game/combatEntity";
 
-export interface UnitHandle {
+export interface UnitHandle extends CombatEntity {
   root: TransformNode;
   team: Team;
   kind: string;
@@ -10,18 +11,33 @@ export interface UnitHandle {
    * Rifleman 2; tank 0.5 once aimed; helicopter 0.2 (missile every 5s).
    */
   fireRateHz: number;
+  hp: number;
+  maxHp: number;
+  shootRange: number;
+  moveSpeed: number;
+  damage: number;
   /** Enter or leave combat animation (shooting pose / aim+fire). */
   setCombat: (active: boolean) => void;
   /**
-   * Optional guided-fire target (helicopter missiles chase this).
-   * Other units ignore it.
+   * Guided / turret aim target. Buildings and units both work.
    */
-  setAimTarget: (target: UnitHandle | null) => void;
+  setAimTarget: (target: CombatEntity | null) => void;
+  /** Called whenever this unit fires a hitscan shot (rifleman / tank / heli gun). */
+  setOnFire: (cb: (() => void) | null) => void;
+  /**
+   * Helicopter missiles: called when a missile reaches its aim target.
+   * Receives the launch-time target (so wrecked helis still deal damage) and hit position.
+   * Hitscan units ignore this.
+   */
+  setOnMissileHit: (cb: ((target: CombatEntity, hitPos: Vector3) => void) | null) => void;
   /** Enable locomotion animation (walk / drive roll) while root is translated externally. */
   setMoving: (active: boolean) => void;
   /** Play randomized destruction animation (no-op if already destroyed). */
   destroy: () => void;
   readonly destroyed: boolean;
+  /** True once the corpse has sunk and can be disposed. */
+  readonly expired: boolean;
+  takeDamage: (amount: number) => void;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 }

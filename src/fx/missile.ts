@@ -10,6 +10,8 @@ export interface MissileOptions {
   /** World-space cruise altitude (helicopter height). */
   cruiseY: number;
   speed: number;
+  /** Fired once when the missile reaches hitRange (receives impact world position). */
+  onHit?: (hitPos: Vector3) => void;
 }
 
 export interface MissileHandle {
@@ -96,7 +98,8 @@ export function createMissile(
       const diving = horiz < diveRange;
 
       if (diving) {
-        desired.set(target.x, target.y + 0.35, target.z);
+        // Dive straight at body center
+        desired.copyFrom(target);
       } else {
         desired.set(target.x, opts.cruiseY, target.z);
       }
@@ -104,6 +107,7 @@ export function createMissile(
       desired.subtractToRef(root.position, tmp);
       const dist = tmp.length();
       if (dist < hitRange) {
+        opts.onHit?.(root.position.clone());
         alive = false;
         return false;
       }

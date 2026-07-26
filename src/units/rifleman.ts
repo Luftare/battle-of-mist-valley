@@ -1,4 +1,5 @@
 import { Mesh, Scene, TransformNode, Vector3 } from "@babylonjs/core";
+import type { CombatEntity } from "../game/combatEntity";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat } from "../theme/materials";
 import {
@@ -10,6 +11,8 @@ import {
   stepDebris,
   type DebrisPiece,
 } from "./debris";
+import { createUnitCombatState } from "./combatState";
+import { createKnockback } from "./knockback";
 import { createUnitShadow } from "./shadow";
 import { approach, type UnitHandle } from "./types";
 
@@ -24,6 +27,9 @@ export function createRifleman(
 ): UnitHandle {
   const palette = TEAM_COLORS[team];
   const root = new TransformNode(`${name}_root`, scene);
+  const combatState = createUnitCombatState("rifleman");
+  const knockback = createKnockback();
+  const hitPoint = new Vector3();
 
   const bodyMat = colorMat(scene, `${name}_body`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -118,8 +124,8 @@ export function createRifleman(
   let flashTimer = 0;
   let fireRateHz = 2;
   let walkPhase = phase;
-  let destroyed = false;
   let deathSettled = false;
+  let aimTarget: CombatEntity | null = null;
   const debris: DebrisPiece[] = [];
   const deathVel = new Vector3();
   const deathSpin = new Vector3();
@@ -152,11 +158,43 @@ export function createRifleman(
     set fireRateHz(hz: number) {
       fireRateHz = Math.max(0.1, hz);
     },
+    get hp() {
+      return combatState.hp;
+    },
+    get maxHp() {
+      return combatState.maxHp;
+    },
+    get shootRange() {
+      return combatState.shootRange;
+    },
+    get moveSpeed() {
+      return combatState.moveSpeed;
+    },
+    get damage() {
+      return combatState.damage;
+    },
     get destroyed() {
-      return destroyed;
+      return combatState.destroyed;
+    },
+    get expired() {
+      return combatState.expired;
+    },
+    takeDamage: (amount) => {
+      combatState.takeDamage(amount, () => handle.destroy());
+    },
+    getHitPoint: (out?: Vector3) => {
+      const p = out ?? hitPoint;
+      p.copyFrom(root.getAbsolutePosition());
+      p.y += 0.75;
+      return p;
+    },
+    applyImpact: (fromX, fromZ, strength) => {
+      if (combatState.destroyed) return;
+      knockback.applyImpact(fromX, fromZ, strength, root);
     },
     setCombat: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
+      if (combat === active) return;
       combat = active;
       if (active) {
         fireCooldown = 0.15 + Math.random() * 0.2;
@@ -166,14 +204,20 @@ export function createRifleman(
         muzzleFlash.visibility = 0;
       }
     },
-    setAimTarget: () => {},
+    setAimTarget: (target) => {
+      aimTarget = target;
+    },
+    setOnFire: (cb) => {
+      combatState.onFire = cb;
+    },
+    setOnMissileHit: () => {},
     setMoving: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
       moving = active;
     },
     destroy: () => {
-      if (destroyed) return;
-      destroyed = true;
+      if (combatState.destroyed) return;
+      combatState.beginDeath();
       combat = false;
       moving = false;
       muzzleFlash.visibility = 0;
@@ -203,7 +247,7 @@ export function createRifleman(
       }
     },
     update: (dt, time) => {
-      if (destroyed) {
+      if (combatState.destroyed) {
         stepDebris(debris, dt, 0.05, 12);
 
         if (!deathSettled) {
@@ -254,10 +298,25 @@ export function createRifleman(
         }
 
         shadow.mesh.visibility = Math.max(0, (shadow.mesh.visibility || 1) - dt * 0.5);
+        combatState.updateCorpse(dt, root);
         return;
       }
 
       const t = time + phase;
+      const tip = knockback.step(dt, root);
+
+      // Face the aim target while shooting
+      if (combat && aimTarget && !aimTarget.destroyed) {
+        const ap = aimTarget.getHitPoint();
+        const dx = ap.x - root.position.x;
+        const dz = ap.z - root.position.z;
+        if (dx * dx + dz * dz > 1e-4) {
+          const yaw = Math.atan2(dx, dz);
+          const dy = Math.atan2(Math.sin(yaw - root.rotation.y), Math.cos(yaw - root.rotation.y));
+          root.rotation.y += Math.sign(dy) * Math.min(Math.abs(dy), 4 * dt);
+        }
+      }
+
       pose = approach(pose, combat ? 1 : 0, dt * 3.5);
       moveBlend = approach(moveBlend, moving ? 1 : 0, dt * 4);
       const idle = 1 - pose;
@@ -277,9 +336,13 @@ export function createRifleman(
       body.rotation.z =
         Math.sin(t * 1.1) * 0.03 * idle * (1 - moveBlend) +
         pose * 0.04 +
-        stride * 0.04 * moveBlend;
+        stride * 0.04 * moveBlend +
+        tip.tipX;
       body.rotation.x =
-        Math.sin(t * 0.7) * 0.015 * idle + pose * 0.06 - recoil * 0.18 * pose;
+        Math.sin(t * 0.7) * 0.015 * idle +
+        pose * 0.06 -
+        recoil * 0.18 * pose +
+        tip.tipZ;
 
       head.rotation.y = Math.sin(t * 0.45) * 0.18 * idle - CHEST_BLADE * pose;
       head.rotation.x = Math.sin(t * 0.6) * 0.05 * idle + pose * 0.1;
@@ -313,12 +376,13 @@ export function createRifleman(
       rightLeg.rotation.y = -pose * 0.08 * (1 - moveBlend);
       rightLeg.rotation.z = -pose * 0.05 * (1 - moveBlend);
 
-      if (combat && pose > 0.9) {
+      if (combat && pose > 0.9 && aimTarget && !aimTarget.destroyed) {
         fireCooldown -= dt;
         if (fireCooldown <= 0) {
           fireCooldown = 1 / fireRateHz;
           recoil = 1;
           flashTimer = 0.06;
+          combatState.onFire?.();
         }
       }
 

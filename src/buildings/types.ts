@@ -1,12 +1,21 @@
 import type { TransformNode } from "@babylonjs/core";
 import type { Team } from "../theme/colors";
+import type { CombatEntity } from "../game/combatEntity";
+import type { UnitKind } from "../game/stats";
 
 export type BuildingKind = "barracks" | "factory" | "helipad";
 
-export interface BuildingHandle {
+export interface BuildingHandle extends CombatEntity {
   root: TransformNode;
   team: Team;
   kind: BuildingKind;
+  /** Unit type this building produces. */
+  spawns: UnitKind;
+  hp: number;
+  maxHp: number;
+  takeDamage: (amount: number) => void;
+  readonly destroyed: boolean;
+  readonly expired: boolean;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 }

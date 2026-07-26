@@ -1,4 +1,5 @@
-import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
+import { Mesh, Scene, TransformNode, Vector3 } from "@babylonjs/core";
+import type { CombatEntity } from "../game/combatEntity";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat } from "../theme/materials";
 import { createMissile, type MissileHandle } from "../fx/missile";
@@ -11,19 +12,27 @@ import {
   stepDebris,
   type DebrisPiece,
 } from "./debris";
+import { createUnitCombatState } from "./combatState";
+import { createKnockback } from "./knockback";
 import { createUnitShadow } from "./shadow";
 import { approach, type UnitHandle } from "./types";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 
+import { HELI_GUN_FIRE_HZ } from "../game/stats";
+
 /** Matches lab march speed for helicopters; missiles move 4× this. */
 const HELI_MOVE_SPEED = 1.3;
 const MISSILE_SPEED = HELI_MOVE_SPEED * 4;
-const HELI_FIRE_HZ = 0.2; // once every 5 seconds
+const HELI_MISSILE_HZ = 0.2; // once every 5 seconds
 const CRUISE_Y = 2.7;
 
+function isTankTarget(target: CombatEntity): boolean {
+  return "kind" in target && (target as UnitHandle).kind === "tank";
+}
+
 /**
- * Blocky helicopter with spinning rotors, hover bob, and guided missiles.
- * Combat: fires a missile at the aim target every 5s; missile cruises then dives.
+ * Blocky helicopter with spinning rotors, hover bob, chin gun, and guided missiles.
+ * Combat: missiles vs tanks; chin gun vs helicopters / infantry / buildings.
  * Destroy: main rotor flies off, tail boom snaps away, fuselage drops.
  */
 export function createHelicopter(
@@ -33,6 +42,9 @@ export function createHelicopter(
 ): UnitHandle {
   const palette = TEAM_COLORS[team];
   const root = new TransformNode(`${name}_root`, scene);
+  const combatState = createUnitCombatState("helicopter");
+  const knockback = createKnockback();
+  const hitPoint = new Vector3();
 
   const bodyMat = colorMat(scene, `${name}_body`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -46,6 +58,10 @@ export function createHelicopter(
     specular: 0,
     emissive: 1,
   });
+  const gunFlashMat = colorMat(scene, `${name}_gunFlash`, "#ffe8a0", {
+    specular: 0,
+    emissive: 1,
+  });
 
   const body = new TransformNode(`${name}_body`, scene);
   body.parent = root;
@@ -54,6 +70,22 @@ export function createHelicopter(
   box(scene, `${name}_fuse`, { w: 0.55, h: 0.4, d: 1.2 }, new Vector3(0, 0, 0), bodyMat, body);
   box(scene, `${name}_nose`, { w: 0.45, h: 0.32, d: 0.35 }, new Vector3(0, 0.02, 0.65), glassMat, body);
   box(scene, `${name}_stripe`, { w: 0.57, h: 0.1, d: 0.5 }, new Vector3(0, 0.05, -0.1), trimMat, body);
+
+  // Chin gun under the nose
+  const chinGun = new TransformNode(`${name}_chinGun`, scene);
+  chinGun.parent = body;
+  chinGun.position = new Vector3(0, -0.28, 0.35);
+  box(scene, `${name}_gunMount`, { w: 0.12, h: 0.1, d: 0.14 }, new Vector3(0, 0.04, 0), darkMat, chinGun);
+  box(scene, `${name}_gunBarrel`, { w: 0.05, h: 0.05, d: 0.32 }, new Vector3(0, 0, 0.2), metalMat, chinGun);
+  const gunFlash = box(
+    scene,
+    `${name}_gunFlash`,
+    { w: 0.1, h: 0.1, d: 0.16 },
+    new Vector3(0, 0, 0.42),
+    gunFlashMat,
+    chinGun,
+  ) as Mesh;
+  gunFlash.visibility = 0;
 
   // Tail assembly — snaps off as one piece on destroy
   const tail = new TransformNode(`${name}_tail`, scene);
@@ -137,14 +169,15 @@ export function createHelicopter(
   let tailSpin = phase * 1.3;
   let combat = false;
   let moving = false;
-  let destroyed = false;
   let fireCooldown = 0;
-  let fireRateHz = HELI_FIRE_HZ;
+  let fireRateHz = HELI_MISSILE_HZ;
   let nextPod = 0;
   let flashTimer = 0;
   let flashSide: 0 | 1 = 0;
+  let gunFlashTimer = 0;
   let launchKick = 0;
-  let aimTarget: UnitHandle | null = null;
+  let gunRecoil = 0;
+  let aimTarget: CombatEntity | null = null;
   const missiles: MissileHandle[] = [];
   let missileSeq = 0;
   const debris: DebrisPiece[] = [];
@@ -152,6 +185,7 @@ export function createHelicopter(
   const fallSpin = new Vector3();
   let smoke: WreckSmokeHandle | null = null;
   const launchWorld = new Vector3();
+  const aimScratch = new Vector3();
 
   const shadow = createUnitShadow(scene, name, root, {
     width: 0.28,
@@ -171,7 +205,6 @@ export function createHelicopter(
 
     pod.computeWorldMatrix(true);
     launchWorld.copyFrom(pod.getAbsolutePosition());
-    // Drop slightly below the rack so it clears the wing
     launchWorld.y -= 0.08;
 
     const cruiseY = body.getAbsolutePosition().y;
@@ -182,13 +215,17 @@ export function createHelicopter(
       launchWorld.clone(),
       () => {
         if (!targetRef || targetRef.destroyed) return null;
-        return targetRef.root.getAbsolutePosition();
+        return targetRef.getHitPoint(aimScratch);
       },
       {
         cruiseY,
         speed: MISSILE_SPEED,
-        diveRange: 2.4,
-        hitRange: 0.5,
+        diveRange: 2.6,
+        hitRange: 0.55,
+        onHit: (hitPos) => {
+          // Use launch-time target so damage still applies after this heli dies
+          combatState.onMissileHit?.(targetRef, hitPos);
+        },
       },
     );
     missiles.push(missile);
@@ -196,7 +233,14 @@ export function createHelicopter(
     launchKick = 1;
   }
 
-  return {
+  function fireChinGun(): void {
+    if (!aimTarget || aimTarget.destroyed) return;
+    gunFlashTimer = 0.05;
+    gunRecoil = 1;
+    combatState.onFire?.();
+  }
+
+  const handle: UnitHandle = {
     root,
     team,
     kind: "helicopter",
@@ -206,34 +250,76 @@ export function createHelicopter(
     set fireRateHz(hz: number) {
       fireRateHz = Math.max(0.05, hz);
     },
+    get hp() {
+      return combatState.hp;
+    },
+    get maxHp() {
+      return combatState.maxHp;
+    },
+    get shootRange() {
+      return combatState.shootRange;
+    },
+    get moveSpeed() {
+      return combatState.moveSpeed;
+    },
+    get damage() {
+      // Public damage is missile damage; gun damage is applied via onFire wiring.
+      return combatState.damage;
+    },
     get destroyed() {
-      return destroyed;
+      return combatState.destroyed;
+    },
+    get expired() {
+      return combatState.expired;
+    },
+    takeDamage: (amount) => {
+      combatState.takeDamage(amount, () => handle.destroy());
+    },
+    getHitPoint: (out?: Vector3) => {
+      const p = out ?? hitPoint;
+      body.computeWorldMatrix(true);
+      p.copyFrom(body.getAbsolutePosition());
+      return p;
+    },
+    applyImpact: (fromX, fromZ, strength) => {
+      if (combatState.destroyed) return;
+      knockback.applyImpact(fromX, fromZ, strength, root);
     },
     setCombat: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
+      if (combat === active) return;
       combat = active;
       if (active) {
-        fireCooldown = 0.4 + Math.random() * 0.3;
+        fireCooldown = 0.25 + Math.random() * 0.2;
       } else {
         flashTimer = 0;
+        gunFlashTimer = 0;
         flashL.visibility = 0;
         flashR.visibility = 0;
+        gunFlash.visibility = 0;
       }
     },
     setAimTarget: (target) => {
       aimTarget = target;
     },
+    setOnFire: (cb) => {
+      combatState.onFire = cb;
+    },
+    setOnMissileHit: (cb) => {
+      combatState.onMissileHit = cb;
+    },
     setMoving: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
       moving = active;
     },
     destroy: () => {
-      if (destroyed) return;
-      destroyed = true;
+      if (combatState.destroyed) return;
+      combatState.beginDeath();
       combat = false;
       moving = false;
       flashL.visibility = 0;
       flashR.visibility = 0;
+      gunFlash.visibility = 0;
 
       debris.push(
         makeDebris(
@@ -265,7 +351,6 @@ export function createHelicopter(
       smoke.start();
     },
     update: (dt, time) => {
-      // Missiles keep flying even after the heli is wrecked
       for (let i = missiles.length - 1; i >= 0; i--) {
         if (!missiles[i].update(dt)) {
           missiles[i].dispose();
@@ -273,7 +358,7 @@ export function createHelicopter(
         }
       }
 
-      if (destroyed) {
+      if (combatState.destroyed) {
         stepDebris(debris, dt, 0.05, 16);
         fallVel.y -= 14 * dt;
         body.position.x += fallVel.x * dt;
@@ -296,11 +381,40 @@ export function createHelicopter(
         }
         shadow.update();
         smoke?.update();
+        combatState.updateCorpse(dt, root);
         return;
       }
 
+      const tip = knockback.step(dt, root);
       const t = time + phase;
+
+      if (combat && aimTarget && !aimTarget.destroyed) {
+        const ap = aimTarget.getHitPoint(aimScratch);
+        const dx = ap.x - root.position.x;
+        const dz = ap.z - root.position.z;
+        if (dx * dx + dz * dz > 1e-4) {
+          const yaw = Math.atan2(dx, dz);
+          const dy = Math.atan2(Math.sin(yaw - root.rotation.y), Math.cos(yaw - root.rotation.y));
+          root.rotation.y += Math.sign(dy) * Math.min(Math.abs(dy), 2.5 * dt);
+        }
+
+        // Pitch chin gun toward the hit point
+        body.computeWorldMatrix(true);
+        const gunPos = chinGun.getAbsolutePosition();
+        const toTarget = ap.subtract(gunPos);
+        const horiz = Math.hypot(toTarget.x, toTarget.z);
+        const desiredPitch = Math.atan2(-toTarget.y, Math.max(0.2, horiz));
+        chinGun.rotation.x = approach(
+          chinGun.rotation.x,
+          Math.max(-0.85, Math.min(0.55, desiredPitch)),
+          dt * 4,
+        );
+      } else {
+        chinGun.rotation.x = approach(chinGun.rotation.x, 0.15, dt * 2);
+      }
+
       launchKick = approach(launchKick, 0, dt * 3.2);
+      gunRecoil = approach(gunRecoil, 0, dt * 12);
 
       body.position.y =
         CRUISE_Y +
@@ -309,12 +423,16 @@ export function createHelicopter(
         launchKick * 0.04;
       body.rotation.z =
         Math.sin(t * 1.1) * 0.05 +
-        (flashSide === 0 ? -1 : 1) * launchKick * 0.08;
+        (flashSide === 0 ? -1 : 1) * launchKick * 0.08 +
+        tip.tipX;
       body.rotation.x =
         Math.sin(t * 0.9) * 0.035 +
         (moving ? 0.12 : 0) -
-        launchKick * 0.06;
+        launchKick * 0.06 +
+        tip.tipZ;
       body.rotation.y = Math.sin(t * 0.4) * 0.08;
+
+      chinGun.position.z = 0.35 - gunRecoil * 0.04;
 
       const rotorMul = moving || combat ? 1.35 : 1;
       mainSpin += dt * 5.5 * rotorMul;
@@ -323,10 +441,16 @@ export function createHelicopter(
       tailRotor.rotation.x = tailSpin;
 
       if (combat && aimTarget && !aimTarget.destroyed) {
+        const useMissile = isTankTarget(aimTarget);
         fireCooldown -= dt;
         if (fireCooldown <= 0) {
-          fireCooldown = 1 / fireRateHz;
-          launchMissile();
+          if (useMissile) {
+            fireCooldown = 1 / HELI_MISSILE_HZ;
+            launchMissile();
+          } else {
+            fireCooldown = 1 / HELI_GUN_FIRE_HZ;
+            fireChinGun();
+          }
         }
       }
 
@@ -343,6 +467,14 @@ export function createHelicopter(
         flashR.visibility = 0;
       }
 
+      if (gunFlashTimer > 0) {
+        gunFlashTimer -= dt;
+        gunFlash.visibility = Math.min(1, gunFlashTimer * 22);
+        gunFlash.scaling.setAll(0.7 + Math.random() * 0.6);
+      } else {
+        gunFlash.visibility = 0;
+      }
+
       shadow.update();
     },
     dispose: () => {
@@ -354,4 +486,6 @@ export function createHelicopter(
       root.dispose(false, true);
     },
   };
+
+  return handle;
 }

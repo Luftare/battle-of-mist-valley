@@ -2,6 +2,7 @@ import { Scene, TransformNode, Vector3 } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import { createBlobShadow } from "../units/shadow";
+import { withBuildingCombat } from "./combat";
 import type { BuildingHandle } from "./types";
 
 /**
@@ -252,13 +253,13 @@ export function createBarracks(
     groundY: 0.04,
   });
 
-  return {
+  return withBuildingCombat({
     root,
     team,
     kind: "barracks",
-    update: (_dt, time) => {
+    spawns: "rifleman",
+    updateAlive: (_dt, time) => {
       const t = time + phase;
-      // Gentle multi-segment flag wave
       for (let i = 0; i < flagSegs.length; i++) {
         const amp = 0.18 + i * 0.12;
         flagSegs[i].rotation.y = Math.sin(t * 2.4 + i * 0.9) * amp;
@@ -267,7 +268,6 @@ export function createBarracks(
       antenna.rotation.z = Math.sin(t * 1.1) * 0.04;
       antenna.rotation.x = Math.sin(t * 0.9 + 1) * 0.03;
 
-      // Rising, drifting smoke puffs
       for (let i = 0; i < smokePuffs.length; i++) {
         const cycle = ((t * 0.55 + i * 0.45) % 1.2) / 1.2;
         const puff = smokePuffs[i];
@@ -279,9 +279,9 @@ export function createBarracks(
       }
       shadow.update();
     },
-    dispose: () => {
+    disposeVisuals: () => {
       shadow.dispose();
       root.dispose(false, true);
     },
-  };
+  });
 }

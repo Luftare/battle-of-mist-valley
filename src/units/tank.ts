@@ -1,4 +1,5 @@
 import { Mesh, Scene, TransformNode, Vector3 } from "@babylonjs/core";
+import type { CombatEntity } from "../game/combatEntity";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import {
@@ -10,21 +11,26 @@ import {
   stepDebris,
   type DebrisPiece,
 } from "./debris";
+import { createUnitCombatState } from "./combatState";
+import { createKnockback } from "./knockback";
 import { createUnitShadow } from "./shadow";
 import { approach, shortestAngleDelta, type UnitHandle } from "./types";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 
 const TANK_FIRE_HZ = 0.5;
-const TURRET_AIM_SPEED = 1.8;
+const TURRET_AIM_SPEED = 0.55;
 
 /**
  * Blocky tank with a rotating turret and idle rumble.
- * Combat: turret aims to hull front, then fires at 0.5Hz.
+ * Combat: turret aims at the enemy, then fires at 0.5Hz once aligned.
  * Destroy: hull tips, turret (and gun) launches off with randomized debris motion.
  */
 export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   const palette = TEAM_COLORS[team];
   const root = new TransformNode(`${name}_root`, scene);
+  const combatState = createUnitCombatState("tank");
+  const knockback = createKnockback();
+  const hitPoint = new Vector3();
 
   const hullMat = colorMat(scene, `${name}_hull`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -143,7 +149,6 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   muzzleFlash.visibility = 0;
 
   const phase = Math.random() * Math.PI * 2;
-  let turretAngle = phase;
   let combat = false;
   let moving = false;
   let aimed = false;
@@ -152,11 +157,12 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   let flashTimer = 0;
   let fireRateHz = TANK_FIRE_HZ;
   let moveBob = 0;
-  let destroyed = false;
+  let aimTarget: CombatEntity | null = null;
   const debris: DebrisPiece[] = [];
   let hullTip = Vector3.Zero();
   let hullTipVel = Vector3.Zero();
   let smoke: WreckSmokeHandle | null = null;
+  const aimWorld = new Vector3();
 
   const shadow = createUnitShadow(scene, name, root, {
     width: 1.15,
@@ -164,6 +170,16 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
     opacity: 0.5,
     getCasterHeight: () => 0.35,
   });
+
+  function desiredTurretYaw(): number {
+    if (!aimTarget || aimTarget.destroyed) return 0;
+    aimWorld.copyFrom(aimTarget.getHitPoint());
+    const dx = aimWorld.x - root.position.x;
+    const dz = aimWorld.z - root.position.z;
+    if (dx * dx + dz * dz < 1e-6) return turret.rotation.y;
+    const worldYaw = Math.atan2(dx, dz);
+    return shortestAngleDelta(0, worldYaw - root.rotation.y);
+  }
 
   const handle: UnitHandle = {
     root,
@@ -175,30 +191,66 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
     set fireRateHz(hz: number) {
       fireRateHz = Math.max(0.05, hz);
     },
+    get hp() {
+      return combatState.hp;
+    },
+    get maxHp() {
+      return combatState.maxHp;
+    },
+    get shootRange() {
+      return combatState.shootRange;
+    },
+    get moveSpeed() {
+      return combatState.moveSpeed;
+    },
+    get damage() {
+      return combatState.damage;
+    },
     get destroyed() {
-      return destroyed;
+      return combatState.destroyed;
+    },
+    get expired() {
+      return combatState.expired;
+    },
+    takeDamage: (amount) => {
+      combatState.takeDamage(amount, () => handle.destroy());
+    },
+    getHitPoint: (out?: Vector3) => {
+      const p = out ?? hitPoint;
+      p.copyFrom(root.getAbsolutePosition());
+      p.y += 0.45;
+      return p;
+    },
+    applyImpact: (fromX, fromZ, strength) => {
+      if (combatState.destroyed) return;
+      knockback.applyImpact(fromX, fromZ, strength, root);
     },
     setCombat: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
+      if (combat === active) return;
       combat = active;
       aimed = false;
       if (active) {
         fireCooldown = 0.35;
-        turretAngle = turret.rotation.y;
       } else {
         flashTimer = 0;
         muzzleFlash.visibility = 0;
-        turretAngle = turret.rotation.y;
       }
     },
-    setAimTarget: () => {},
+    setAimTarget: (target) => {
+      aimTarget = target;
+    },
+    setOnFire: (cb) => {
+      combatState.onFire = cb;
+    },
+    setOnMissileHit: () => {},
     setMoving: (active) => {
-      if (destroyed) return;
+      if (combatState.destroyed) return;
       moving = active;
     },
     destroy: () => {
-      if (destroyed) return;
-      destroyed = true;
+      if (combatState.destroyed) return;
+      combatState.beginDeath();
       combat = false;
       moving = false;
       aimed = false;
@@ -223,7 +275,7 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
       smoke.start();
     },
     update: (dt, time) => {
-      if (destroyed) {
+      if (combatState.destroyed) {
         stepDebris(debris, dt);
         hullTip.x = approach(hullTip.x, hullTipVel.x, dt * 2.5);
         hullTip.z = approach(hullTip.z, hullTipVel.z * 0.4, dt * 1.5);
@@ -232,11 +284,13 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
         body.position.y = approach(body.position.y, 0.18, dt * 1.2);
         shadow.mesh.visibility = Math.max(0, (shadow.mesh.visibility || 1) - dt * 0.4);
         smoke?.update();
+        combatState.updateCorpse(dt, root);
         return;
       }
 
       const t = time + phase;
       if (moving) moveBob += dt * 14;
+      const tip = knockback.step(dt, root);
 
       body.position.y =
         0.28 +
@@ -245,35 +299,49 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
         recoil * 0.025 +
         (moving ? Math.sin(moveBob) * 0.015 : 0);
       body.position.z = -recoil * 0.1;
-      body.rotation.z = Math.sin(t * 2.1) * 0.012 + (moving ? Math.sin(moveBob * 0.5) * 0.02 : 0);
-      body.rotation.x = Math.sin(t * 1.7) * 0.008 - recoil * 0.09;
+      body.rotation.z =
+        Math.sin(t * 2.1) * 0.012 +
+        (moving ? Math.sin(moveBob * 0.5) * 0.02 : 0) +
+        tip.tipX;
+      body.rotation.x =
+        Math.sin(t * 1.7) * 0.008 - recoil * 0.09 + tip.tipZ;
 
       if (combat) {
-        const delta = shortestAngleDelta(turret.rotation.y, 0);
+        const targetYaw = desiredTurretYaw();
+        const delta = shortestAngleDelta(turret.rotation.y, targetYaw);
         const step = Math.sign(delta) * Math.min(Math.abs(delta), TURRET_AIM_SPEED * dt);
         turret.rotation.y += step;
-        turretAngle = turret.rotation.y;
 
         barrel.rotation.x = approach(barrel.rotation.x, -recoil * 0.12, dt * 2.5);
 
-        if (Math.abs(shortestAngleDelta(turret.rotation.y, 0)) < 0.04) {
+        if (Math.abs(shortestAngleDelta(turret.rotation.y, targetYaw)) < 0.06) {
           aimed = true;
-          turret.rotation.y = 0;
+          turret.rotation.y = targetYaw;
+        } else {
+          aimed = false;
         }
 
-        if (aimed) {
+        if (aimed && aimTarget && !aimTarget.destroyed) {
           fireCooldown -= dt;
           if (fireCooldown <= 0) {
             fireCooldown = 1 / fireRateHz;
             recoil = 1;
             flashTimer = 0.12;
+            combatState.onFire?.();
           }
         }
       } else {
         aimed = false;
-        turretAngle += dt * 0.25;
-        turret.rotation.y = turretAngle + Math.sin(t * 0.35) * 0.15;
-        barrel.rotation.x = Math.sin(t * 0.55) * 0.06;
+        // Gentle idle: ease turret toward hull-forward with a light sway (no continuous spin)
+        const idleYaw = Math.sin(t * 0.35) * 0.18;
+        const idleDelta = shortestAngleDelta(turret.rotation.y, idleYaw);
+        turret.rotation.y +=
+          Math.sign(idleDelta) * Math.min(Math.abs(idleDelta), 0.35 * dt);
+        barrel.rotation.x = approach(
+          barrel.rotation.x,
+          Math.sin(t * 0.55) * 0.04,
+          dt * 2,
+        );
       }
 
       recoil = approach(recoil, 0, dt * 2.2);
