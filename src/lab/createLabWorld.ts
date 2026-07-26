@@ -19,7 +19,30 @@ import type { Team } from "../theme/colors";
 
 export interface LabWorld {
   scene: Scene;
+  setCombat: (active: boolean) => void;
+  /** Advance red team halfway toward blue, or reset them if already advanced. */
+  toggleRedAdvance: () => "marching" | "home";
+  getRedAdvanceState: () => "home" | "marching" | "halfway";
+  /** Trigger randomized destruction on every living unit. */
+  destroyAll: () => void;
   dispose: () => void;
+}
+
+interface Placement {
+  kind: "rifleman" | "tank" | "helicopter";
+  team: Team;
+  x: number;
+  z: number;
+  rotY: number;
+}
+
+interface RedMarcher {
+  unit: UnitHandle;
+  homeX: number;
+  homeZ: number;
+  targetX: number;
+  targetZ: number;
+  speed: number;
 }
 
 /**
@@ -35,7 +58,6 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
   scene.fogStart = 28;
   scene.fogEnd = 55;
 
-  // Bird's-eye angled top-down
   const camera = new ArcRotateCamera(
     "labCamera",
     -Math.PI / 2.4,
@@ -52,10 +74,8 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
   camera.pinchPrecision = 80;
   camera.panningSensibility = 80;
   camera.attachControl(canvas, true);
-  // Prefer orbit over pan on touch
   camera.useInputToRestoreState = false;
 
-  // Soft daylight
   const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.3), scene);
   hemi.intensity = 0.75;
   hemi.groundColor = new Color3(0.25, 0.28, 0.18);
@@ -69,9 +89,7 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
   const terrain = createTerrain(scene, 36);
 
   const units: UnitHandle[] = [];
-
-  // Layout: blue team on -X, red on +X; units small relative to terrain
-  const placements: { kind: "rifleman" | "tank" | "helicopter"; team: Team; x: number; z: number; rotY: number }[] = [
+  const placements: Placement[] = [
     { kind: "rifleman", team: "blue", x: -4.5, z: 2.5, rotY: Math.PI / 2 },
     { kind: "rifleman", team: "red", x: 4.5, z: 2.5, rotY: -Math.PI / 2 },
     { kind: "tank", team: "blue", x: -4.5, z: -1.5, rotY: Math.PI / 2 },
@@ -90,9 +108,52 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     unit.root.position.x = p.x;
     unit.root.position.z = p.z;
     unit.root.rotation.y = p.rotY;
-    // Scale units down for bird's-eye feel
     unit.root.scaling.setAll(0.85);
     units.push(unit);
+  }
+
+  const blueByKind = new Map(
+    units.filter((u) => u.team === "blue").map((u) => [u.kind, u] as const),
+  );
+
+  const marchSpeeds: Record<string, number> = {
+    rifleman: 0.85,
+    tank: 1.15,
+    helicopter: 1.3,
+  };
+
+  const redMarchers: RedMarcher[] = units
+    .filter((u) => u.team === "red")
+    .map((unit) => {
+      const blue = blueByKind.get(unit.kind);
+      const homeX = unit.root.position.x;
+      const homeZ = unit.root.position.z;
+      const blueX = blue?.root.position.x ?? 0;
+      const blueZ = blue?.root.position.z ?? homeZ;
+      return {
+        unit,
+        homeX,
+        homeZ,
+        targetX: (homeX + blueX) * 0.5,
+        targetZ: (homeZ + blueZ) * 0.5,
+        speed: marchSpeeds[unit.kind] ?? 1.8,
+      };
+    });
+
+  let redAdvanceState: "home" | "marching" | "halfway" = "home";
+
+  function resetRedTeam(): void {
+    for (const m of redMarchers) {
+      m.unit.setMoving(false);
+      m.unit.root.position.x = m.homeX;
+      m.unit.root.position.z = m.homeZ;
+    }
+    redAdvanceState = "home";
+  }
+
+  function startRedMarch(): void {
+    for (const m of redMarchers) m.unit.setMoving(true);
+    redAdvanceState = "marching";
   }
 
   let elapsed = 0;
@@ -100,11 +161,61 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     const dt = engine.getDeltaTime() / 1000;
     elapsed += dt;
     terrain.update(dt, elapsed);
+
+    if (redAdvanceState === "marching") {
+      let allArrived = true;
+      for (const m of redMarchers) {
+        const pos = m.unit.root.position;
+        const dx = m.targetX - pos.x;
+        const dz = m.targetZ - pos.z;
+        const dist = Math.hypot(dx, dz);
+        if (dist < 0.04) {
+          pos.x = m.targetX;
+          pos.z = m.targetZ;
+          m.unit.setMoving(false);
+        } else {
+          allArrived = false;
+          const step = Math.min(dist, m.speed * dt);
+          pos.x += (dx / dist) * step;
+          pos.z += (dz / dist) * step;
+        }
+      }
+      if (allArrived) redAdvanceState = "halfway";
+    }
+
     for (const unit of units) unit.update(dt, elapsed);
   });
 
   return {
     scene,
+    setCombat: (active) => {
+      for (const unit of units) unit.setCombat(active);
+    },
+    toggleRedAdvance: () => {
+      if (redAdvanceState === "home") {
+        startRedMarch();
+        return "marching";
+      }
+      resetRedTeam();
+      return "home";
+    },
+    getRedAdvanceState: () => redAdvanceState,
+    destroyAll: () => {
+      redAdvanceState = "home";
+      for (const m of redMarchers) m.unit.setMoving(false);
+      for (const unit of units) {
+        if (!unit.destroyed) {
+          // Slight stagger so they don't all pop identically
+          const delay = Math.random() * 0.25;
+          if (delay < 0.02) unit.destroy();
+          else {
+            window.setTimeout(() => {
+              if (!unit.destroyed) unit.destroy();
+            }, delay * 1000);
+          }
+        }
+      }
+    },
     dispose: () => {
       for (const unit of units) unit.dispose();
       terrain.dispose();
