@@ -8,6 +8,12 @@ import {
   Scene,
   Vector3,
 } from "@babylonjs/core";
+import {
+  createBarracks,
+  createFactory,
+  createHelipad,
+  type BuildingHandle,
+} from "../buildings";
 import { createTerrain } from "../terrain/createTerrain";
 import {
   createHelicopter,
@@ -89,6 +95,7 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
   const terrain = createTerrain(scene, 36);
 
   const units: UnitHandle[] = [];
+  const buildings: BuildingHandle[] = [];
   const placements: Placement[] = [
     { kind: "rifleman", team: "blue", x: -4.5, z: 2.5, rotY: Math.PI / 2 },
     { kind: "rifleman", team: "red", x: 4.5, z: 2.5, rotY: -Math.PI / 2 },
@@ -96,6 +103,22 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     { kind: "tank", team: "red", x: 4.5, z: -1.5, rotY: -Math.PI / 2 },
     { kind: "helicopter", team: "blue", x: -3.2, z: -4.5, rotY: Math.PI / 2 },
     { kind: "helicopter", team: "red", x: 3.2, z: -4.5, rotY: -Math.PI / 2 },
+  ];
+
+  /** Buildings sit just outside their unit on each flank, facing the field. */
+  const buildingPlacements: Array<{
+    kind: Placement["kind"];
+    team: Team;
+    x: number;
+    z: number;
+    rotY: number;
+  }> = [
+    { kind: "rifleman", team: "blue", x: -7.3, z: 2.5, rotY: Math.PI / 2 },
+    { kind: "rifleman", team: "red", x: 7.3, z: 2.5, rotY: -Math.PI / 2 },
+    { kind: "tank", team: "blue", x: -7.5, z: -1.5, rotY: Math.PI / 2 },
+    { kind: "tank", team: "red", x: 7.5, z: -1.5, rotY: -Math.PI / 2 },
+    { kind: "helicopter", team: "blue", x: -6.4, z: -4.6, rotY: Math.PI / 2 },
+    { kind: "helicopter", team: "red", x: 6.4, z: -4.6, rotY: -Math.PI / 2 },
   ];
 
   for (const p of placements) {
@@ -110,6 +133,20 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     unit.root.rotation.y = p.rotY;
     unit.root.scaling.setAll(0.85);
     units.push(unit);
+  }
+
+  for (const p of buildingPlacements) {
+    const name = `${p.team}_${p.kind}_building`;
+    let building: BuildingHandle;
+    if (p.kind === "rifleman") building = createBarracks(scene, name, p.team);
+    else if (p.kind === "tank") building = createFactory(scene, name, p.team);
+    else building = createHelipad(scene, name, p.team);
+
+    building.root.position.x = p.x;
+    building.root.position.z = p.z;
+    building.root.rotation.y = p.rotY;
+    building.root.scaling.setAll(0.9);
+    buildings.push(building);
   }
 
   const blueByKind = new Map(
@@ -161,6 +198,7 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     const dt = engine.getDeltaTime() / 1000;
     elapsed += dt;
     terrain.update(dt, elapsed);
+    for (const building of buildings) building.update(dt, elapsed);
 
     if (redAdvanceState === "marching") {
       let allArrived = true;
@@ -218,6 +256,7 @@ export function createLabWorld(engine: Engine, canvas: HTMLCanvasElement): LabWo
     },
     dispose: () => {
       for (const unit of units) unit.dispose();
+      for (const building of buildings) building.dispose();
       terrain.dispose();
       scene.dispose();
     },

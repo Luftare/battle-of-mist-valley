@@ -182,8 +182,10 @@ export function createTerrain(scene: Scene, size = 36): TerrainHandle {
     patch.rotation.y = rand() * Math.PI;
   }
 
-  // Trees — keep center clear for units
+  // Trees — keep lab staging corridor clear for units + buildings
   const treeCount = 18;
+  const inStagingLane = (x: number, z: number) =>
+    Math.abs(x) < 9.5 && Math.abs(z) < 6.5;
   for (let i = 0; i < treeCount; i++) {
     let x = 0;
     let z = 0;
@@ -192,7 +194,7 @@ export function createTerrain(scene: Scene, size = 36): TerrainHandle {
       x = (rand() - 0.5) * size * 0.9;
       z = (rand() - 0.5) * size * 0.9;
       attempts++;
-    } while (Math.hypot(x, z) < 7 && attempts < 20);
+    } while ((Math.hypot(x, z) < 9 || inStagingLane(x, z)) && attempts < 30);
 
     const scale = 0.7 + rand() * 0.7;
     const tree = createTree(scene, `tree_${i}`, root, scale);
@@ -223,7 +225,7 @@ export function createTerrain(scene: Scene, size = 36): TerrainHandle {
       x = (rand() - 0.5) * size * 0.88;
       z = (rand() - 0.5) * size * 0.88;
       attempts++;
-    } while (Math.hypot(x, z) < 5 && attempts < 20);
+    } while ((Math.hypot(x, z) < 8 || inStagingLane(x, z)) && attempts < 30);
 
     const scale = 0.4 + rand() * 0.8;
     const rock = createRock(scene, `rock_${i}`, root, scale);
