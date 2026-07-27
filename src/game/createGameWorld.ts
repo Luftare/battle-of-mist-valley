@@ -315,11 +315,20 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   function addCoins(
     team: Team,
     amount: number,
-    opts?: { world?: Vector3; popup?: boolean },
+    opts?: {
+      world?: Vector3;
+      popup?: boolean;
+      /** Keep the popup anchored over a moving unit while it rises. */
+      follow?: () => Vector3;
+    },
   ): void {
     coins[team] += amount;
     if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
-    if (opts?.popup && opts.world) coinFx.spawn(opts.world, amount);
+    if (opts?.popup && (opts.follow || opts.world)) {
+      coinFx.spawn(opts.world ?? opts.follow!(), amount, {
+        follow: opts.follow,
+      });
+    }
   }
 
   function trySpend(team: Team, cost: number): boolean {
@@ -810,6 +819,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         addCoins(unit.team, SUPPLY_TRUCK_COIN_AMOUNT, {
           world: unit.root.position.clone(),
           popup: true,
+          follow: () => unit.root.getAbsolutePosition(),
         });
       }
 

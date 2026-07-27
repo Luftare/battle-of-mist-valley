@@ -84,8 +84,8 @@ export const COINS_PER_SEC = 2;
 export const STARTING_COINS = 80;
 
 /** Supply trucks mint coins while alive. */
-export const SUPPLY_TRUCK_COIN_INTERVAL_SEC = 2;
-export const SUPPLY_TRUCK_COIN_AMOUNT = 2;
+export const SUPPLY_TRUCK_COIN_INTERVAL_SEC = 1;
+export const SUPPLY_TRUCK_COIN_AMOUNT = 1;
 
 /** Owner-initiated teardown duration (seconds). */
 export const COLLAPSE_DURATION_SEC = 4.5;
