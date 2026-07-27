@@ -88,7 +88,11 @@ export function createBlobShadow(
     mesh.position.z = world.z + LIGHT_DIR.z * t;
     const gy = opts.groundY;
     mesh.position.y =
-      typeof gy === "function" ? gy() : typeof gy === "number" ? gy : 0.04;
+      typeof gy === "function"
+        ? gy()
+        : typeof gy === "number"
+          ? gy
+          : world.y + 0.04;
 
     const altitudeFade = 1 / (1 + casterH * 0.35);
     const sizeScale = Math.max(0.25, 1 + casterH * sizePerHeight);

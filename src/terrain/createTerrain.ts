@@ -51,6 +51,11 @@ export interface TerrainHandle {
   getGroundYAt: (x: number, z: number) => number;
   /** Max mesh height under a circular footprint (for pads on slopes). */
   getGroundYAtFootprint: (x: number, z: number, radius: number) => number;
+  /**
+   * Pitch (rotation.x) and roll (rotation.z) so a yaw-facing vehicle
+   * matches the ground facet at XZ.
+   */
+  getGroundTiltAt: (x: number, z: number, yaw: number) => { pitch: number; roll: number };
   /** Knock over any standing tree the tank overlaps. */
   ramTreesAt: (x: number, z: number, radius: number) => void;
   update: (dt: number, time: number) => void;
@@ -180,57 +185,156 @@ function createGrassTuft(
 
 /**
  * Flat meadow with a single soft hill in the center.
+ * Sampled only at coarse vertices — facets come from low subdivision.
  */
 function sampleHeightMap(x: number, z: number): number {
   const dist = Math.hypot(x, z);
-  const radius = 5.5;
+  const radius = 9;
   const t = Math.max(0, 1 - dist / radius);
-  // Smoothstep falloff so the mound blends into flat ground
   const falloff = t * t * (3 - 2 * t);
-  return falloff * 1.35;
+  return falloff * 3.4;
 }
 
-const GROUND_SUBDIVISIONS = 72;
+/** Large triangles so the central hill reads as clear low-poly facets. */
+const GROUND_SUBDIVISIONS = 8;
 
-/** Bilinear height lookup from the baked ground mesh vertices. */
-function buildGroundHeightLookup(
+/** Height on a triangle given local UV (u,v) in [0,1]² of a ground cell. */
+function heightOnCellTriangle(
+  y00: number,
+  y10: number,
+  y01: number,
+  y11: number,
+  u: number,
+  v: number,
+): number {
+  // Babylon CreateGround splits each quad along the (0,0)–(1,1) diagonal.
+  if (u >= v) {
+    // Triangle (0,0), (1,0), (1,1) — barycentric
+    return (1 - u) * y00 + (u - v) * y10 + v * y11;
+  }
+  // Triangle (0,0), (1,1), (0,1)
+  return (1 - v) * y00 + u * y11 + (v - u) * y01;
+}
+
+/**
+ * Height + normal lookups matching CreateGround's vertex order and triangulation
+ * (row 0 = +Z). Samples exact facet planes so units sit on the low-poly mesh.
+ */
+function buildGroundSamplers(
   positions: number[],
   size: number,
-): (x: number, z: number) => number {
+): {
+  getGroundYAt: (x: number, z: number) => number;
+  getGroundTiltAt: (
+    x: number,
+    z: number,
+    yaw: number,
+  ) => { pitch: number; roll: number };
+} {
   const half = size * 0.5;
   const n = GROUND_SUBDIVISIONS + 1;
-  const grid: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(0));
-
-  for (let i = 0; i < positions.length; i += 3) {
-    const x = positions[i];
-    const z = positions[i + 2];
-    const y = positions[i + 1];
-    const col = Math.round(((x + half) / size) * GROUND_SUBDIVISIONS);
-    const row = Math.round(((z + half) / size) * GROUND_SUBDIVISIONS);
-    if (row >= 0 && row < n && col >= 0 && col < n) {
-      grid[row][col] = y;
-    }
+  const cell = size / GROUND_SUBDIVISIONS;
+  const heights = new Float32Array(n * n);
+  // CreateGround packs vertices row-major with row 0 at +Z.
+  for (let i = 0, vi = 0; i < positions.length; i += 3, vi++) {
+    heights[vi] = positions[i + 1];
   }
 
-  return (x: number, z: number) => {
+  const h = (row: number, col: number) => heights[row * n + col] ?? 0;
+
+  function sampleCell(x: number, z: number): {
+    row0: number;
+    col0: number;
+    u: number;
+    v: number;
+    y00: number;
+    y10: number;
+    y01: number;
+    y11: number;
+  } {
     const colF = ((x + half) / size) * GROUND_SUBDIVISIONS;
-    const rowF = ((z + half) / size) * GROUND_SUBDIVISIONS;
+    const rowF = ((half - z) / size) * GROUND_SUBDIVISIONS;
     const col0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(colF)));
     const row0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(rowF)));
-    const col1 = Math.min(col0 + 1, GROUND_SUBDIVISIONS);
-    const row1 = Math.min(row0 + 1, GROUND_SUBDIVISIONS);
-    const tx = colF - col0;
-    const tz = rowF - row0;
+    return {
+      row0,
+      col0,
+      u: Math.min(1, Math.max(0, colF - col0)),
+      v: Math.min(1, Math.max(0, rowF - row0)),
+      y00: h(row0, col0),
+      y10: h(row0, col0 + 1),
+      y01: h(row0 + 1, col0),
+      y11: h(row0 + 1, col0 + 1),
+    };
+  }
 
-    const h = (row: number, col: number) => grid[row][col] ?? 0;
-    const y00 = h(row0, col0);
-    const y10 = h(row0, col1);
-    const y01 = h(row1, col0);
-    const y11 = h(row1, col1);
-    const y0 = y00 + (y10 - y00) * tx;
-    const y1 = y01 + (y11 - y01) * tx;
-    return y0 + (y1 - y0) * tz;
+  function facetNormal(
+    y00: number,
+    y10: number,
+    y01: number,
+    y11: number,
+    u: number,
+    v: number,
+  ): { x: number; y: number; z: number } {
+    // World deltas for one cell: +X = cell, +Z = -cell (row increases → −Z)
+    let ax: number;
+    let ay: number;
+    let az: number;
+    let bx: number;
+    let by: number;
+    let bz: number;
+    if (u >= v) {
+      // Triangle (0,0)→(1,0)→(1,1)
+      ax = cell;
+      ay = y10 - y00;
+      az = 0;
+      bx = cell;
+      by = y11 - y00;
+      bz = -cell;
+    } else {
+      // Triangle (0,0)→(1,1)→(0,1)
+      ax = cell;
+      ay = y11 - y00;
+      az = -cell;
+      bx = 0;
+      by = y01 - y00;
+      bz = -cell;
+    }
+    let nx = ay * bz - az * by;
+    let ny = az * bx - ax * bz;
+    let nz = ax * by - ay * bx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len;
+    ny /= len;
+    nz /= len;
+    // Ensure upward-facing
+    if (ny < 0) {
+      nx = -nx;
+      ny = -ny;
+      nz = -nz;
+    }
+    return { x: nx, y: ny, z: nz };
+  }
+
+  const getGroundYAt = (x: number, z: number) => {
+    const c = sampleCell(x, z);
+    return heightOnCellTriangle(c.y00, c.y10, c.y01, c.y11, c.u, c.v);
   };
+
+  const getGroundTiltAt = (x: number, z: number, yaw: number) => {
+    const c = sampleCell(x, z);
+    const normal = facetNormal(c.y00, c.y10, c.y01, c.y11, c.u, c.v);
+    const sy = Math.sin(yaw);
+    const cy = Math.cos(yaw);
+    const fwdDot = normal.x * sy + normal.z * cy;
+    const rightDot = normal.x * cy - normal.z * sy;
+    return {
+      pitch: Math.atan2(fwdDot, normal.y),
+      roll: Math.atan2(-rightDot, normal.y),
+    };
+  };
+
+  return { getGroundYAt, getGroundTiltAt };
 }
 
 /** Highest ground under a circular footprint — keeps wide pads flush on slopes. */
@@ -313,6 +417,11 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
   let getGroundYAt: (x: number, z: number) => number = sampleHeightMap;
   let getGroundYAtFootprint: (x: number, z: number, radius: number) => number =
     (x, z) => sampleHeightMap(x, z);
+  let getGroundTiltAt: (
+    x: number,
+    z: number,
+    yaw: number,
+  ) => { pitch: number; roll: number } = () => ({ pitch: 0, roll: 0 });
   const positions = ground.getVerticesData("position");
   if (positions) {
     const pos = positions as number[];
@@ -321,9 +430,12 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     }
     flattenSlotPads(pos, half, sampleHeightMap);
     ground.updateVerticesData("position", pos);
-    ground.createNormals(true);
-    getGroundYAt = buildGroundHeightLookup(pos, size);
+    const samplers = buildGroundSamplers(pos, size);
+    getGroundYAt = samplers.getGroundYAt;
+    getGroundTiltAt = samplers.getGroundTiltAt;
     getGroundYAtFootprint = buildGroundYAtFootprint(getGroundYAt);
+    // Faceted normals — large triangles read clearly as low-poly
+    ground.convertToFlatShadedMesh();
   }
 
   function removeObstacle(obs: Obstacle): void {
@@ -475,6 +587,7 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     sampleGroundY: getGroundYAt,
     getGroundYAt,
     getGroundYAtFootprint,
+    getGroundTiltAt,
     ramTreesAt: (x, z, radius) => {
       for (const runtime of treeRuntimes) {
         if (runtime.state !== "standing") continue;

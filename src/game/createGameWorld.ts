@@ -57,7 +57,7 @@ import {
   createTank,
   type UnitHandle,
 } from "../units";
-import { shortestAngleDelta } from "../units/types";
+import { approach, shortestAngleDelta } from "../units/types";
 import { createHud } from "../ui/hud";
 
 /** Hull yaw rate (rad/s) — tanks turn in place before driving. */
@@ -560,7 +560,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     );
     unit.root.position.x = spawnX;
     unit.root.position.z = spawnZ;
-    unit.root.position.y = 0;
+    unit.root.position.y = terrain.getGroundYAt(spawnX, spawnZ);
     unit.root.rotation.y = towardEnemy > 0 ? 0 : Math.PI;
     unit.root.scaling.setAll(0.8);
     unit.fireRateHz = UNIT_STATS[kind].fireRateHz;
@@ -1188,6 +1188,21 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     }
 
     for (const agent of agents) agent.unit.update(dt, elapsed);
+
+    // Keep living units seated on the low-poly ground facets
+    const tiltSpeed = 2.8; // rad/s — ease across facet edges
+    for (const agent of agents) {
+      const unit = agent.unit;
+      if (unit.destroyed) continue;
+      const { x, z } = unit.root.position;
+      unit.root.position.y = terrain.getGroundYAt(x, z);
+      if (unit.kind === "tank" || unit.kind === "supplyTruck") {
+        const tilt = terrain.getGroundTiltAt(x, z, unit.root.rotation.y);
+        const maxStep = tiltSpeed * dt;
+        unit.root.rotation.x = approach(unit.root.rotation.x, tilt.pitch, maxStep);
+        unit.root.rotation.z = approach(unit.root.rotation.z, tilt.roll, maxStep);
+      }
+    }
 
     coinFx.update(dt, scene);
 

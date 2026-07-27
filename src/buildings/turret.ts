@@ -35,6 +35,9 @@ export interface TurretHandle extends CombatEntity {
 
 const TURRET_TURN_SPEED = 0.55;
 const TURRET_ALIGN_RAD = 0.06;
+const IDLE_YAW_LIMIT = Math.PI / 4; // ±45°
+const IDLE_TURN_SPEED = 0.22;
+const BARREL_PITCH_LIMIT = 0.55; // ~31° up/down
 /** Gun pivot sits on the pad (no pedestal neck). */
 const GUN_PIVOT_Y = 0.2;
 
@@ -48,6 +51,8 @@ export function createTurret(
 ): TurretHandle {
   const palette = TEAM_COLORS[team];
   const root = new TransformNode(`${name}_root`, scene);
+  // Face the midfield: blue looks north (+Z), red looks south (−Z)
+  root.rotation.y = team === "red" ? Math.PI : 0;
   const phase = Math.random() * Math.PI * 2;
 
   const padMat = colorMat(scene, `${name}_pad`, "#5a5a54");
@@ -206,9 +211,30 @@ export function createTurret(
   let flashSide: 0 | 1 = 0;
   let onFire: (() => void) | null = null;
   let lastAttackerTeam: Team | null = null;
+  let idleDir: 1 | -1 = Math.random() < 0.5 ? 1 : -1;
+  let aimPitch = 0;
+  gun.rotation.y = (Math.random() * 2 - 1) * IDLE_YAW_LIMIT;
   const baseY = 0;
   const hitPoint = new Vector3();
   const muzzleWorld = new Vector3();
+
+  function setBarrelPitch(pitch: number): void {
+    barrelL.rotation.x = pitch;
+    barrelR.rotation.x = pitch;
+  }
+
+  function desiredBarrelPitch(target: CombatEntity): number {
+    const tp = target.getHitPoint();
+    barrelL.computeWorldMatrix(true);
+    const from = barrelL.getAbsolutePosition();
+    const dx = tp.x - from.x;
+    const dy = tp.y - from.y;
+    const dz = tp.z - from.z;
+    const horiz = Math.hypot(dx, dz);
+    if (horiz < 1e-4) return 0;
+    const pitch = -Math.atan2(dy, horiz);
+    return Math.max(-BARREL_PITCH_LIMIT, Math.min(BARREL_PITCH_LIMIT, pitch));
+  }
 
   const handle: TurretHandle = {
     root,
@@ -298,11 +324,41 @@ export function createTurret(
         const dx = tp.x - root.position.x;
         const dz = tp.z - root.position.z;
         if (dx * dx + dz * dz > 1e-4) {
-          const yaw = Math.atan2(dx, dz);
-          const dy = shortestAngleDelta(gun.rotation.y, yaw);
+          const worldYaw = Math.atan2(dx, dz);
+          const localYaw = worldYaw - root.rotation.y;
+          const dy = shortestAngleDelta(gun.rotation.y, localYaw);
           gun.rotation.y +=
             Math.sign(dy) * Math.min(Math.abs(dy), TURRET_TURN_SPEED * dt);
-          aligned = Math.abs(shortestAngleDelta(gun.rotation.y, yaw)) < TURRET_ALIGN_RAD;
+
+          const targetPitch = desiredBarrelPitch(aimTarget);
+          const pitchStep =
+            Math.sign(targetPitch - aimPitch) *
+            Math.min(Math.abs(targetPitch - aimPitch), TURRET_TURN_SPEED * dt);
+          aimPitch += pitchStep;
+          setBarrelPitch(aimPitch);
+
+          aligned =
+            Math.abs(shortestAngleDelta(gun.rotation.y, localYaw)) < TURRET_ALIGN_RAD &&
+            Math.abs(aimPitch - targetPitch) < TURRET_ALIGN_RAD;
+        }
+      } else {
+        // Slow search sweep across ±45° when idle (ease back into arc after combat)
+        if (gun.rotation.y > IDLE_YAW_LIMIT) idleDir = -1;
+        else if (gun.rotation.y < -IDLE_YAW_LIMIT) idleDir = 1;
+        gun.rotation.y += idleDir * IDLE_TURN_SPEED * dt;
+        if (gun.rotation.y >= IDLE_YAW_LIMIT) {
+          gun.rotation.y = IDLE_YAW_LIMIT;
+          idleDir = -1;
+        } else if (gun.rotation.y <= -IDLE_YAW_LIMIT) {
+          gun.rotation.y = -IDLE_YAW_LIMIT;
+          idleDir = 1;
+        }
+        // Level barrels while scanning
+        if (aimPitch !== 0) {
+          const step =
+            Math.sign(-aimPitch) * Math.min(Math.abs(aimPitch), TURRET_TURN_SPEED * dt);
+          aimPitch += step;
+          setBarrelPitch(aimPitch);
         }
       }
 

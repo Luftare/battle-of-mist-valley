@@ -19,6 +19,8 @@ import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 
 const TANK_FIRE_HZ = 0.5;
 const TURRET_AIM_SPEED = 0.55;
+const BARREL_PITCH_LIMIT = 0.55; // ~31° up/down
+const AIM_ALIGN_RAD = 0.06;
 
 /**
  * Blocky tank with a rotating turret and idle rumble.
@@ -158,6 +160,7 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   let fireRateHz = TANK_FIRE_HZ;
   let moveBob = 0;
   let aimTarget: CombatEntity | null = null;
+  let aimPitch = 0;
   const debris: DebrisPiece[] = [];
   let hullTip = Vector3.Zero();
   let hullTipVel = Vector3.Zero();
@@ -179,6 +182,21 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
     if (dx * dx + dz * dz < 1e-6) return turret.rotation.y;
     const worldYaw = Math.atan2(dx, dz);
     return shortestAngleDelta(0, worldYaw - root.rotation.y);
+  }
+
+  /** Barrel pitch (rotation.x): negative tips up toward higher targets. */
+  function desiredBarrelPitch(): number {
+    if (!aimTarget || aimTarget.destroyed) return 0;
+    aimWorld.copyFrom(aimTarget.getHitPoint());
+    barrel.computeWorldMatrix(true);
+    const from = barrel.getAbsolutePosition();
+    const dx = aimWorld.x - from.x;
+    const dy = aimWorld.y - from.y;
+    const dz = aimWorld.z - from.z;
+    const horiz = Math.hypot(dx, dz);
+    if (horiz < 1e-4) return 0;
+    const pitch = -Math.atan2(dy, horiz);
+    return Math.max(-BARREL_PITCH_LIMIT, Math.min(BARREL_PITCH_LIMIT, pitch));
   }
 
   const handle: UnitHandle = {
@@ -308,15 +326,21 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
 
       if (combat) {
         const targetYaw = desiredTurretYaw();
+        const targetPitch = desiredBarrelPitch();
         const delta = shortestAngleDelta(turret.rotation.y, targetYaw);
         const step = Math.sign(delta) * Math.min(Math.abs(delta), TURRET_AIM_SPEED * dt);
         turret.rotation.y += step;
 
-        barrel.rotation.x = approach(barrel.rotation.x, -recoil * 0.12, dt * 2.5);
+        aimPitch = approach(aimPitch, targetPitch, TURRET_AIM_SPEED * dt);
+        barrel.rotation.x = aimPitch - recoil * 0.12;
 
-        if (Math.abs(shortestAngleDelta(turret.rotation.y, targetYaw)) < 0.06) {
+        const yawOk =
+          Math.abs(shortestAngleDelta(turret.rotation.y, targetYaw)) < AIM_ALIGN_RAD;
+        const pitchOk = Math.abs(aimPitch - targetPitch) < AIM_ALIGN_RAD;
+        if (yawOk && pitchOk) {
           aimed = true;
           turret.rotation.y = targetYaw;
+          aimPitch = targetPitch;
         } else {
           aimed = false;
         }
@@ -337,11 +361,8 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
         const idleDelta = shortestAngleDelta(turret.rotation.y, idleYaw);
         turret.rotation.y +=
           Math.sign(idleDelta) * Math.min(Math.abs(idleDelta), 0.35 * dt);
-        barrel.rotation.x = approach(
-          barrel.rotation.x,
-          Math.sin(t * 0.55) * 0.04,
-          dt * 2,
-        );
+        aimPitch = approach(aimPitch, Math.sin(t * 0.55) * 0.04, dt * 2);
+        barrel.rotation.x = aimPitch;
       }
 
       recoil = approach(recoil, 0, dt * 2.2);
