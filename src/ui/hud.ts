@@ -20,6 +20,8 @@ export interface BuildModalOpts {
 
 export interface HudHandle {
   setCoins: (n: number) => void;
+  /** Drive the displayed coin tween each frame. */
+  update: (dt: number) => void;
   openBuildModal: (opts: BuildModalOpts) => void;
   closeModal: () => void;
   showEndScreen: (result: "victory" | "defeat") => void;
@@ -62,8 +64,13 @@ export function createHud(): HudHandle {
   endHost.hidden = true;
   document.body.appendChild(endHost);
 
-  const coinValue = () =>
-    document.getElementById("hudCoinValue") as HTMLElement;
+  const coinEl = () => document.getElementById("hudCoinValue") as HTMLElement;
+  const coinsWrap = () => document.getElementById("hudCoins") as HTMLElement;
+
+  let targetCoins = 0;
+  let displayCoins = 0;
+  let pulseTimer = 0;
+  let pulseDir: "up" | "down" | null = null;
 
   function closeModal(): void {
     modalHost.hidden = true;
@@ -71,9 +78,48 @@ export function createHud(): HudHandle {
     modalHost.onclick = null;
   }
 
+  function paintCoins(): void {
+    const el = coinEl();
+    if (!el) return;
+    el.textContent = String(Math.round(displayCoins));
+  }
+
   return {
     setCoins: (n) => {
-      coinValue().textContent = String(Math.floor(n));
+      const next = Math.max(0, n);
+      const delta = next - targetCoins;
+      if (Math.abs(delta) < 1e-4) return;
+      // Pulse only on meaningful jumps (spend / truck / bounty), not passive drip
+      if (Math.abs(delta) >= 0.95) {
+        pulseDir = delta > 0 ? "up" : "down";
+        pulseTimer = 0.35;
+        const wrap = coinsWrap();
+        if (wrap) {
+          wrap.classList.remove("coin-pulse-up", "coin-pulse-down");
+          void wrap.offsetWidth;
+          wrap.classList.add(pulseDir === "up" ? "coin-pulse-up" : "coin-pulse-down");
+        }
+      }
+      targetCoins = next;
+    },
+    update: (dt) => {
+      const diff = targetCoins - displayCoins;
+      if (Math.abs(diff) < 0.05) {
+        displayCoins = targetCoins;
+      } else {
+        // Ease toward target: faster on big jumps, smooth tick on small ones
+        const rate = Math.max(18, Math.abs(diff) * 6);
+        displayCoins += Math.sign(diff) * Math.min(Math.abs(diff), rate * dt);
+      }
+      paintCoins();
+
+      if (pulseTimer > 0) {
+        pulseTimer -= dt;
+        if (pulseTimer <= 0) {
+          coinsWrap()?.classList.remove("coin-pulse-up", "coin-pulse-down");
+          pulseDir = null;
+        }
+      }
     },
     openBuildModal: (opts) => {
       closeModal();

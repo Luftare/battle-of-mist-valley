@@ -7,6 +7,12 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { PLAY_SIZE } from "../game/stats";
+import {
+  getBuildingSlotPositions,
+  inBuildingBand,
+  PLATFORM_PAD_HALF_D,
+  PLATFORM_PAD_HALF_W,
+} from "../game/slotLayout";
 import { WORLD_COLORS } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import { createBlobShadow, type BlobShadowHandle } from "../units/shadow";
@@ -41,6 +47,10 @@ export interface TerrainHandle {
   rockObstacles: readonly Obstacle[];
   trees: readonly TerrainTree[];
   sampleGroundY: (x: number, z: number) => number;
+  /** Height of the rendered ground mesh at world XZ (matches hills visually). */
+  getGroundYAt: (x: number, z: number) => number;
+  /** Max mesh height under a circular footprint (for pads on slopes). */
+  getGroundYAtFootprint: (x: number, z: number, radius: number) => number;
   /** Knock over any standing tree the tank overlaps. */
   ramTreesAt: (x: number, z: number, radius: number) => void;
   update: (dt: number, time: number) => void;
@@ -168,16 +178,104 @@ function createGrassTuft(
   return tuft;
 }
 
-function sampleGroundY(x: number, z: number): number {
-  return (
-    Math.sin(x * 0.25) * Math.cos(z * 0.2) * 0.35 +
-    Math.sin(x * 0.55 + 1.2) * Math.sin(z * 0.4) * 0.15
-  );
+/**
+ * Flat meadow with a single soft hill in the center.
+ */
+function sampleHeightMap(x: number, z: number): number {
+  const dist = Math.hypot(x, z);
+  const radius = 5.5;
+  const t = Math.max(0, 1 - dist / radius);
+  // Smoothstep falloff so the mound blends into flat ground
+  const falloff = t * t * (3 - 2 * t);
+  return falloff * 1.35;
 }
 
-/** Building lanes on ±X — keep clear for slots + spawn. */
-function inBuildingLane(x: number, z: number, half: number): boolean {
-  return Math.abs(x) > half * 0.55 && Math.abs(z) < half * 0.92;
+const GROUND_SUBDIVISIONS = 72;
+
+/** Bilinear height lookup from the baked ground mesh vertices. */
+function buildGroundHeightLookup(
+  positions: number[],
+  size: number,
+): (x: number, z: number) => number {
+  const half = size * 0.5;
+  const n = GROUND_SUBDIVISIONS + 1;
+  const grid: number[][] = Array.from({ length: n }, () => new Array<number>(n).fill(0));
+
+  for (let i = 0; i < positions.length; i += 3) {
+    const x = positions[i];
+    const z = positions[i + 2];
+    const y = positions[i + 1];
+    const col = Math.round(((x + half) / size) * GROUND_SUBDIVISIONS);
+    const row = Math.round(((z + half) / size) * GROUND_SUBDIVISIONS);
+    if (row >= 0 && row < n && col >= 0 && col < n) {
+      grid[row][col] = y;
+    }
+  }
+
+  return (x: number, z: number) => {
+    const colF = ((x + half) / size) * GROUND_SUBDIVISIONS;
+    const rowF = ((z + half) / size) * GROUND_SUBDIVISIONS;
+    const col0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(colF)));
+    const row0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(rowF)));
+    const col1 = Math.min(col0 + 1, GROUND_SUBDIVISIONS);
+    const row1 = Math.min(row0 + 1, GROUND_SUBDIVISIONS);
+    const tx = colF - col0;
+    const tz = rowF - row0;
+
+    const h = (row: number, col: number) => grid[row][col] ?? 0;
+    const y00 = h(row0, col0);
+    const y10 = h(row0, col1);
+    const y01 = h(row1, col0);
+    const y11 = h(row1, col1);
+    const y0 = y00 + (y10 - y00) * tx;
+    const y1 = y01 + (y11 - y01) * tx;
+    return y0 + (y1 - y0) * tz;
+  };
+}
+
+/** Highest ground under a circular footprint — keeps wide pads flush on slopes. */
+function buildGroundYAtFootprint(
+  getGroundYAt: (x: number, z: number) => number,
+): (x: number, z: number, radius: number) => number {
+  return (x, z, radius) => {
+    let maxY = getGroundYAt(x, z);
+    const ringCount = 8;
+    for (let ring = 0.5; ring <= 1; ring += 0.5) {
+      const r = radius * ring;
+      for (let i = 0; i < ringCount; i++) {
+        const a = (i / ringCount) * Math.PI * 2;
+        maxY = Math.max(maxY, getGroundYAt(x + Math.cos(a) * r, z + Math.sin(a) * r));
+      }
+    }
+    return maxY;
+  };
+}
+
+/**
+ * Flatten each build-slot pad to its own local heightmap height so platforms
+ * sit flush without painting dirt over the grass.
+ */
+function flattenSlotPads(
+  positions: number[],
+  half: number,
+  heightFn: (x: number, z: number) => number,
+): void {
+  const slots = getBuildingSlotPositions(half);
+  const padYs = slots.map((s) => heightFn(s.x, s.z));
+  for (let i = 0; i < positions.length; i += 3) {
+    const vx = positions[i];
+    const vz = positions[i + 2];
+    for (let s = 0; s < slots.length; s++) {
+      const slot = slots[s];
+      if (
+        Math.abs(vx - slot.x) <= PLATFORM_PAD_HALF_W &&
+        Math.abs(vz - slot.z) <= PLATFORM_PAD_HALF_D
+      ) {
+        positions[i + 1] = padYs[s];
+        break;
+      }
+    }
+  }
 }
 
 const FALL_DURATION = 0.55;
@@ -205,47 +303,27 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
 
   const ground = MeshBuilder.CreateGround(
     "ground",
-    { width: size, height: size, subdivisions: 24 },
+    { width: size, height: size, subdivisions: GROUND_SUBDIVISIONS },
     scene,
   );
   ground.material = groundMat;
   ground.parent = root;
   ground.receiveShadows = true;
 
+  let getGroundYAt: (x: number, z: number) => number = sampleHeightMap;
+  let getGroundYAtFootprint: (x: number, z: number, radius: number) => number =
+    (x, z) => sampleHeightMap(x, z);
   const positions = ground.getVerticesData("position");
   if (positions) {
-    for (let i = 0; i < positions.length; i += 3) {
-      const x = positions[i];
-      const z = positions[i + 2];
-      positions[i + 1] = sampleGroundY(x, z);
+    const pos = positions as number[];
+    for (let i = 0; i < pos.length; i += 3) {
+      pos[i + 1] = sampleHeightMap(pos[i], pos[i + 2]);
     }
-    ground.updateVerticesData("position", positions);
+    flattenSlotPads(pos, half, sampleHeightMap);
+    ground.updateVerticesData("position", pos);
     ground.createNormals(true);
-  }
-
-  const dirtMat = colorMat(scene, "dirt", WORLD_COLORS.dirt);
-  const border = MeshBuilder.CreateGround(
-    "playBorder",
-    { width: size - 0.4, height: size - 0.4, subdivisions: 1 },
-    scene,
-  );
-  border.material = dirtMat;
-  border.parent = root;
-  border.position.y = 0.015;
-  border.visibility = 0.35;
-
-  for (let i = 0; i < 6; i++) {
-    const patch = MeshBuilder.CreateGround(
-      `dirt_${i}`,
-      { width: 1.8 + rand() * 2.2, height: 1.2 + rand() * 1.8 },
-      scene,
-    );
-    patch.material = dirtMat;
-    patch.parent = root;
-    patch.position.x = (rand() - 0.5) * size * 0.55;
-    patch.position.z = (rand() - 0.5) * size * 0.55;
-    patch.position.y = 0.02;
-    patch.rotation.y = rand() * Math.PI;
+    getGroundYAt = buildGroundHeightLookup(pos, size);
+    getGroundYAtFootprint = buildGroundYAtFootprint(getGroundYAt);
   }
 
   function removeObstacle(obs: Obstacle): void {
@@ -283,13 +361,13 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
       x = (rand() - 0.5) * size * 0.72;
       z = (rand() - 0.5) * size * 0.85;
       attempts++;
-    } while ((Math.abs(x) < 2.2 || inBuildingLane(x, z, half)) && attempts < 40);
+    } while ((Math.abs(x) < 2.2 || inBuildingBand(x, z, half)) && attempts < 40);
 
     const scale = 0.65 + rand() * 0.55;
     const tree = createTree(scene, `tree_${i}`, root, scale);
     tree.position.x = x;
     tree.position.z = z;
-    tree.position.y = sampleGroundY(x, z);
+    tree.position.y = getGroundYAt(x, z);
     tree.rotation.y = rand() * Math.PI * 2;
 
     const radius = 0.14 * scale + 0.08;
@@ -302,7 +380,7 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
       opacity: 0.42,
       sizePerHeight: 0.04,
       getCasterHeight: () => 1.5,
-      groundY: () => sampleGroundY(tree.position.x, tree.position.z) + 0.05,
+      groundY: () => getGroundYAt(tree.position.x, tree.position.z) + 0.05,
     });
     shadows.push(shadow);
 
@@ -343,13 +421,13 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
       x = (rand() - 0.5) * size * 0.7;
       z = (rand() - 0.5) * size * 0.85;
       attempts++;
-    } while ((Math.abs(x) < 1.8 || inBuildingLane(x, z, half)) && attempts < 40);
+    } while ((Math.abs(x) < 1.8 || inBuildingBand(x, z, half)) && attempts < 40);
 
     const scale = 0.35 + rand() * 0.7;
     const rock = createRock(scene, `rock_${i}`, root, scale);
     rock.position.x = x;
     rock.position.z = z;
-    rock.position.y = sampleGroundY(x, z);
+    rock.position.y = getGroundYAt(x, z);
     rock.rotation.y = rand() * Math.PI * 2;
     animated.push({ node: rock, phase: rand() * Math.PI * 2, kind: "rock" });
     const obs: Obstacle = { x, z, radius: 0.32 * scale + 0.12 };
@@ -363,20 +441,27 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
         opacity: 0.48,
         sizePerHeight: 0.05,
         getCasterHeight: () => 0.35,
-        groundY: () => sampleGroundY(rock.position.x, rock.position.z) + 0.05,
+        groundY: () => getGroundYAt(rock.position.x, rock.position.z) + 0.05,
       }),
     );
   }
 
   // Decorative only — never added to obstacles
   for (let i = 0; i < 50; i++) {
-    const x = (rand() - 0.5) * size * 0.9;
-    const z = (rand() - 0.5) * size * 0.9;
+    let x = 0;
+    let z = 0;
+    let attempts = 0;
+    do {
+      x = (rand() - 0.5) * size * 0.9;
+      z = (rand() - 0.5) * size * 0.9;
+      attempts++;
+    } while (inBuildingBand(x, z, half) && attempts < 40);
+
     const scale = 0.55 + rand() * 0.85;
     const tuft = createGrassTuft(scene, `grass_${i}`, root, scale);
     tuft.position.x = x;
     tuft.position.z = z;
-    tuft.position.y = sampleGroundY(x, z);
+    tuft.position.y = getGroundYAt(x, z);
     tuft.rotation.y = rand() * Math.PI * 2;
     animated.push({ node: tuft, phase: rand() * Math.PI * 2, kind: "grass" });
   }
@@ -387,7 +472,9 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     obstacles,
     rockObstacles,
     trees: treeHandles,
-    sampleGroundY,
+    sampleGroundY: getGroundYAt,
+    getGroundYAt,
+    getGroundYAtFootprint,
     ramTreesAt: (x, z, radius) => {
       for (const runtime of treeRuntimes) {
         if (runtime.state !== "standing") continue;
@@ -406,7 +493,7 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
         } else if (prop.kind === "rock") {
           const t = time + prop.phase;
           prop.node.position.y =
-            sampleGroundY(prop.node.position.x, prop.node.position.z) +
+            getGroundYAt(prop.node.position.x, prop.node.position.z) +
             Math.sin(t * 0.3) * 0.004;
         }
       }

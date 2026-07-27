@@ -1,10 +1,14 @@
-import { Mesh, Scene, TransformNode, Vector3 } from "@babylonjs/core";
+import { Scene, TransformNode, Vector3, type Mesh } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat } from "../theme/materials";
 
+const FLOOR_W = 2.75;
+const FLOOR_D = 2.55;
+
+const FLOOR_H = 0.1;
+
 export interface PlatformHandle {
   root: TransformNode;
-  /** Pickable pad mesh used for click selection. */
   pickMesh: Mesh;
   team: Team;
   slotIndex: number;
@@ -14,8 +18,8 @@ export interface PlatformHandle {
 }
 
 /**
- * Empty build site — packed earth, gravel outline, team corner stakes.
- * Looks like groundwork already poured for a future building.
+ * Build site: brown floor slab + gravel rim + corner stakes.
+ * Floor is a thick box on an unscaled base node so it always renders on top of grass.
  */
 export function createPlatform(
   scene: Scene,
@@ -27,10 +31,19 @@ export function createPlatform(
   const root = new TransformNode(`${name}_root`, scene);
   const phase = Math.random() * Math.PI * 2;
 
-  const dirtMat = colorMat(scene, `${name}_dirt`, WORLD_COLORS.dirt);
-  const gravelMat = colorMat(scene, `${name}_gravel`, "#7a6a52");
-  const edgeMat = colorMat(scene, `${name}_edge`, "#5a4a38");
-  const stakeMat = colorMat(scene, `${name}_stake`, WORLD_COLORS.bark);
+  // Floor / rim never scaled — only stakes spin for team facing
+  const base = new TransformNode(`${name}_base`, scene);
+  base.parent = root;
+
+  const facing = new TransformNode(`${name}_facing`, scene);
+  facing.parent = root;
+  facing.rotation.y = team === "red" ? Math.PI : 0;
+
+  const floorMat = colorMat(scene, "platform_floor", WORLD_COLORS.dirt);
+  floorMat.backFaceCulling = false;
+  const gravelMat = colorMat(scene, "platform_gravel", "#7a6a52");
+  const edgeMat = colorMat(scene, "platform_edge", "#5a4a38");
+  const stakeMat = colorMat(scene, "platform_stake", WORLD_COLORS.bark);
   const flagMat = colorMat(scene, `${name}_flag`, palette.primary);
   const accentMat = colorMat(scene, `${name}_accent`, palette.secondary);
   const highlightMat = colorMat(scene, `${name}_hi`, palette.secondary, {
@@ -38,53 +51,78 @@ export function createPlatform(
     emissive: 0.35,
   });
 
-  // Packed earth pad (pickable)
-  const pad = box(
+  const floor = box(
     scene,
-    `${name}_pad`,
-    { w: 2.6, h: 0.1, d: 2.4 },
-    new Vector3(0, 0.05, 0),
-    dirtMat,
-    root,
+    `${name}_floor`,
+    { w: FLOOR_W, h: FLOOR_H, d: FLOOR_D },
+    new Vector3(0, FLOOR_H * 0.5, 0),
+    floorMat,
+    base,
   );
-  pad.isPickable = true;
+  floor.isPickable = true;
+  floor.receiveShadows = true;
 
-  // Gravel / foundation ring
+  const pickMesh = floor;
+
+  const rimY = FLOOR_H + 0.03;
   box(
     scene,
-    `${name}_ring`,
-    { w: 2.75, h: 0.06, d: 2.55 },
-    new Vector3(0, 0.02, 0),
+    `${name}_rimN`,
+    { w: FLOOR_W, h: 0.06, d: 0.14 },
+    new Vector3(0, rimY, FLOOR_D * 0.5 - 0.05),
     gravelMat,
-    root,
+    base,
   );
-  // Inner trench lines (groundwork)
+  box(
+    scene,
+    `${name}_rimS`,
+    { w: FLOOR_W, h: 0.06, d: 0.14 },
+    new Vector3(0, rimY, -FLOOR_D * 0.5 + 0.05),
+    gravelMat,
+    base,
+  );
+  box(
+    scene,
+    `${name}_rimE`,
+    { w: 0.14, h: 0.06, d: FLOOR_D },
+    new Vector3(FLOOR_W * 0.5 - 0.05, rimY, 0),
+    gravelMat,
+    base,
+  );
+  box(
+    scene,
+    `${name}_rimW`,
+    { w: 0.14, h: 0.06, d: FLOOR_D },
+    new Vector3(-FLOOR_W * 0.5 + 0.05, rimY, 0),
+    gravelMat,
+    base,
+  );
+
   box(
     scene,
     `${name}_trenchA`,
     { w: 2.2, h: 0.04, d: 0.12 },
-    new Vector3(0, 0.1, 0.55),
+    new Vector3(0, rimY + 0.02, 0.55),
     edgeMat,
-    root,
+    base,
   );
   box(
     scene,
     `${name}_trenchB`,
     { w: 2.2, h: 0.04, d: 0.12 },
-    new Vector3(0, 0.1, -0.55),
+    new Vector3(0, rimY + 0.02, -0.55),
     edgeMat,
-    root,
+    base,
   );
   box(
     scene,
     `${name}_trenchC`,
     { w: 0.12, h: 0.04, d: 1.5 },
-    new Vector3(0.7, 0.1, 0),
+    new Vector3(0.7, rimY + 0.02, 0),
     edgeMat,
-    root,
+    base,
   );
 
-  // Corner stakes with team ribbons
   const corners: [number, number][] = [
     [-1.15, -1.05],
     [1.15, -1.05],
@@ -95,7 +133,7 @@ export function createPlatform(
   for (let i = 0; i < corners.length; i++) {
     const [cx, cz] = corners[i];
     const stake = new TransformNode(`${name}_stake_${i}`, scene);
-    stake.parent = root;
+    stake.parent = facing;
     stake.position.set(cx, 0, cz);
     box(
       scene,
@@ -119,21 +157,20 @@ export function createPlatform(
     ribbons.push(ribbon);
   }
 
-  // Soft highlight rim (toggled on hover / select)
   const hi = box(
     scene,
     `${name}_highlight`,
-    { w: 2.85, h: 0.03, d: 2.65 },
-    new Vector3(0, 0.12, 0),
+    { w: FLOOR_W + 0.1, h: 0.03, d: FLOOR_D + 0.1 },
+    new Vector3(0, rimY + 0.04, 0),
     highlightMat,
-    root,
+    base,
   );
   hi.isPickable = false;
   hi.setEnabled(false);
 
   return {
     root,
-    pickMesh: pad,
+    pickMesh,
     team,
     slotIndex,
     setHighlight: (on) => {

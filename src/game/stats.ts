@@ -62,6 +62,14 @@ export const HELI_GUN_RANGE = UNIT_STATS.rifleman.shootRange * 0.8;
 export const TANK_SPLASH_RADIUS = 2.2;
 export const MISSILE_SPLASH_RADIUS = 2.8;
 
+/** Fixed map turrets: tank range, rifle cadence, 1.25× rifle damage, 2× tank HP. */
+export const TURRET_SHOOT_RANGE = UNIT_STATS.tank.shootRange;
+export const TURRET_FIRE_HZ = UNIT_STATS.rifleman.fireRateHz;
+export const TURRET_DAMAGE = UNIT_STATS.rifleman.damage * 1.25;
+export const TURRET_MAX_HP = UNIT_STATS.tank.maxHp * 2;
+export const TURRET_BOUNTY = 25;
+export const TURRET_HP_BAR_HEIGHT = 1.85;
+
 export const BUILDING_MAX_HP = 320;
 export const BUILDING_RADIUS = 1.15;
 export const SPAWN_INTERVAL_SEC = 15;

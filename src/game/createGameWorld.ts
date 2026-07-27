@@ -16,9 +16,11 @@ import {
   createFactory,
   createHelipad,
   createPlatform,
+  createTurret,
   type BuildingHandle,
   type BuildingKind,
   type PlatformHandle,
+  type TurretHandle,
 } from "../buildings";
 import type { CombatEntity } from "./combatEntity";
 import { createHpBar, type HpBarHandle } from "./hpBar";
@@ -39,6 +41,8 @@ import {
   SUPPLY_TRUCK_COIN_INTERVAL_SEC,
   SUPPLY_TRUCK_COIN_AMOUNT,
   AI_DECISION_INTERVAL_SEC,
+  TURRET_BOUNTY,
+  TURRET_HP_BAR_HEIGHT,
   type UnitKind,
 } from "./stats";
 import { spawnExplosion } from "../fx/explosion";
@@ -91,6 +95,7 @@ interface Slot {
   x: number;
   z: number;
   rotY: number;
+  surfaceY: number;
   platform: PlatformHandle;
   pickProxy: Mesh;
   building: BuildingHandle | null;
@@ -144,11 +149,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   scene.fogEnd = 62;
 
   const half = PLAY_SIZE * 0.5;
-  const buildingX = half - 2.4;
+  /** Base line along Z: blue south (−Z), red north (+Z). */
+  const buildingZ = half - 2.4;
 
   const camera = new ArcRotateCamera(
     "gameCamera",
-    -Math.PI / 2,
+    Math.PI,
     0.85,
     30,
     new Vector3(0, 0.4, 0),
@@ -177,6 +183,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   const terrain = createTerrain(scene, PLAY_SIZE);
   const agents: Agent[] = [];
   const slots: Slot[] = [];
+  const turrets: TurretHandle[] = [];
+  const turretHpBars: HpBarHandle[] = [];
   const hud = createHud();
   const coinFx = createCoinPopupFx();
   let unitSeq = 0;
@@ -192,21 +200,20 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   let aiCooldown = AI_DECISION_INTERVAL_SEC * 0.4;
   let selectedSlot: Slot | null = null;
 
-  // 8 slots along each side (blue west / red east)
-  const zMin = -half + 2.2;
-  const zMax = half - 2.2;
+  // 8 slots along each end (blue south / red north)
+  const xMin = -half + 2.2;
+  const xMax = half - 2.2;
   for (let i = 0; i < SLOT_COUNT; i++) {
     const t = i / Math.max(1, SLOT_COUNT - 1);
-    const z = zMin + (zMax - zMin) * t;
+    const x = xMin + (xMax - xMin) * t;
     for (const team of ["blue", "red"] as const) {
-      const x = team === "blue" ? -buildingX : buildingX;
-      const rotY = team === "blue" ? Math.PI / 2 : -Math.PI / 2;
+      const z = team === "blue" ? -buildingZ : buildingZ;
+      const rotY = team === "blue" ? 0 : Math.PI;
+      const surfaceY = terrain.getGroundYAt(x, z);
       const platform = createPlatform(scene, `${team}_pad_${i}`, team, i);
       platform.root.position.x = x;
       platform.root.position.z = z;
-      platform.root.position.y = terrain.sampleGroundY(x, z);
-      platform.root.rotation.y = rotY;
-      platform.root.scaling.setAll(0.85);
+      platform.root.position.y = surfaceY;
 
       const pickProxy = MeshBuilder.CreateBox(
         `${team}_pick_${i}`,
@@ -224,11 +231,34 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         x,
         z,
         rotY,
+        surfaceY,
         platform,
         pickProxy,
         building: null,
         spawnCooldown: 0,
       });
+    }
+  }
+
+  // Two defensive turrets per team, ahead of the building line
+  const turretX = half * 0.42;
+  const turretZ = half * 0.38;
+  for (const team of ["blue", "red"] as const) {
+    const zSign = team === "blue" ? -1 : 1;
+    for (const xSign of [-1, 1] as const) {
+      const tx = xSign * turretX;
+      const tz = zSign * turretZ;
+      const turret = createTurret(scene, `${team}_turret_${xSign > 0 ? "E" : "W"}`, team);
+      turret.root.position.x = tx;
+      turret.root.position.z = tz;
+      // Pad diameter 2.1 × 0.9 scale — sample max height so pads stay on slopes
+      turret.root.position.y = terrain.getGroundYAtFootprint(tx, tz, 2.1 * 0.5 * 0.9);
+      turret.root.scaling.setAll(0.9);
+      turrets.push(turret);
+
+      const hpBar = createHpBar(scene, turret.root.name, TEAM_COLORS[team].secondary);
+      hpBar.setRatio(1);
+      turretHpBars.push(hpBar);
     }
   }
 
@@ -246,6 +276,10 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return slots
       .filter((s) => s.team === team && s.building && !s.building.destroyed)
       .map((s) => s.building!);
+  }
+
+  function livingTurrets(team: Team): TurretHandle[] {
+    return turrets.filter((t) => t.team === team && !t.destroyed);
   }
 
   function livingUnits(team: Team): UnitHandle[] {
@@ -278,10 +312,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return counts;
   }
 
-  function addCoins(team: Team, amount: number, at?: Vector3): void {
+  function addCoins(
+    team: Team,
+    amount: number,
+    opts?: { world?: Vector3; popup?: boolean },
+  ): void {
     coins[team] += amount;
     if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
-    if (at) coinFx.spawn(at, amount);
+    if (opts?.popup && opts.world) coinFx.spawn(opts.world, amount);
   }
 
   function trySpend(team: Team, cost: number): boolean {
@@ -289,6 +327,25 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     coins[team] -= cost;
     if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
     return true;
+  }
+
+  function markAttacker(entity: CombatEntity, attackerTeam: Team): void {
+    if ("lastAttackerTeam" in entity) {
+      (entity as TurretHandle).lastAttackerTeam = attackerTeam;
+    }
+  }
+
+  const awardedTurrets = new WeakSet<TurretHandle>();
+
+  function awardTurretBounty(turret: TurretHandle): void {
+    if (awardedTurrets.has(turret)) return;
+    const killer = turret.lastAttackerTeam;
+    if (!killer || killer === turret.team) return;
+    awardedTurrets.add(turret);
+    addCoins(killer, TURRET_BOUNTY, {
+      world: turret.root.position.clone(),
+      popup: true,
+    });
   }
 
   function placeBuilding(
@@ -310,7 +367,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     );
     building.root.position.x = slot.x;
     building.root.position.z = slot.z;
-    building.root.position.y = terrain.sampleGroundY(slot.x, slot.z);
+    building.root.position.y = slot.surfaceY;
     building.root.rotation.y = slot.rotY;
     building.root.scaling.setAll(0.85);
     slot.building = building;
@@ -379,7 +436,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         });
       }
 
+      markAttacker(target, unit.team);
+      const wasAlive = !target.destroyed;
       target.takeDamage(damage);
+      if (wasAlive && target.destroyed && isTurret(target)) {
+        awardTurretBounty(target);
+      }
     });
 
     unit.setOnMissileHit((target, hit) => {
@@ -387,6 +449,34 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       applyArealHit(hit, target, unit.damage, MISSILE_SPLASH_RADIUS, unit.team);
     });
   }
+
+  function isTurret(entity: CombatEntity): entity is TurretHandle {
+    return "kind" in entity && (entity as TurretHandle).kind === "turret";
+  }
+
+  function wireTurretCombat(turret: TurretHandle): void {
+    turret.setOnFire(() => {
+      const target = findTurretFocus(turret);
+      if (!target || target.destroyed) return;
+      const hit = target.getHitPoint();
+      spawnBulletTrace(scene, turret.getMuzzlePoint().clone(), hit, {
+        speed: 62,
+        length: 1.0,
+        thickness: 0.04,
+        color: "#ffe08a",
+      });
+      // Equal damage vs all targets — no type multipliers
+      target.takeDamage(turret.damage);
+    });
+  }
+
+  function findTurretFocus(turret: TurretHandle): CombatEntity | null {
+    // Prefer sticky aim while still in range
+    // (stored on a weak map via agent-like state on the handle itself)
+    return turretAim.get(turret) ?? null;
+  }
+
+  const turretAim = new Map<TurretHandle, CombatEntity | null>();
 
   function applyArealHit(
     center: Vector3,
@@ -404,7 +494,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         if (d > radius) return;
       }
       const dmg = isMain ? baseDamage : baseDamage * 0.5;
+      markAttacker(entity, attackerTeam);
+      const wasAlive = !entity.destroyed;
       entity.takeDamage(dmg);
+      if (wasAlive && entity.destroyed && isTurret(entity)) {
+        awardTurretBounty(entity);
+      }
       if (impact) {
         const strength = isMain ? impact.impactStrength : impact.impactStrength * 0.55;
         entity.applyImpact(impact.impactFromX, impact.impactFromZ, strength);
@@ -419,6 +514,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const b = slot.building;
       if (!b) continue;
       hitEntity(b, b.root.position.x, b.root.position.z);
+    }
+    for (const turret of turrets) {
+      hitEntity(turret, turret.root.position.x, turret.root.position.z);
     }
   }
 
@@ -452,8 +550,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
     const kind = b.spawns;
     const towardEnemy = b.team === "blue" ? 1 : -1;
-    const spawnX = b.root.position.x + towardEnemy * 2.1;
-    const spawnZ = b.root.position.z + (Math.random() - 0.5) * 0.6;
+    const spawnX = b.root.position.x + (Math.random() - 0.5) * 0.6;
+    const spawnZ = b.root.position.z + towardEnemy * 2.1;
     const unit = createUnitOfKind(
       scene,
       `${b.team}_${kind}_${unitSeq++}`,
@@ -463,18 +561,18 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.root.position.x = spawnX;
     unit.root.position.z = spawnZ;
     unit.root.position.y = 0;
-    unit.root.rotation.y = towardEnemy > 0 ? Math.PI / 2 : -Math.PI / 2;
+    unit.root.rotation.y = towardEnemy > 0 ? 0 : Math.PI;
     unit.root.scaling.setAll(0.8);
     unit.fireRateHz = UNIT_STATS[kind].fireRateHz;
 
     const hpBar = createHpBar(scene, unit.root.name, TEAM_COLORS[b.team].secondary);
     hpBar.setRatio(1);
 
-    const advanceX = towardEnemy * (buildingX - 3.5);
+    const advanceZ = towardEnemy * (buildingZ - 3.5);
     const agent: Agent = {
       unit,
       hpBar,
-      moveTarget: { x: advanceX, z: spawnZ + (Math.random() - 0.5) * 1.5 },
+      moveTarget: { x: spawnX + (Math.random() - 0.5) * 1.5, z: advanceZ },
       bypass: null,
       arrived: false,
       focus: null,
@@ -520,9 +618,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return best;
   }
 
-  function findBuildingInRange(unit: UnitHandle): BuildingHandle | null {
+  function findBuildingInRange(unit: UnitHandle): CombatEntity | null {
     const pos = unit.root.position;
-    let best: BuildingHandle | null = null;
+    let best: CombatEntity | null = null;
     let bestDist = Infinity;
     for (const slot of slots) {
       const b = slot.building;
@@ -534,6 +632,44 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         best = b;
       }
     }
+    for (const turret of turrets) {
+      if (turret.destroyed || turret.team === unit.team) continue;
+      const range = engageRange(unit, turret);
+      const d = distXZ(pos, turret.root.position);
+      if (d <= range && d < bestDist) {
+        bestDist = d;
+        best = turret;
+      }
+    }
+    return best;
+  }
+
+  /** Nearest hostile for a turret — units and buildings treated equally. */
+  function acquireTurretTarget(turret: TurretHandle): CombatEntity | null {
+    const pos = turret.root.position;
+    const range = turret.shootRange;
+    let best: CombatEntity | null = null;
+    let bestDist = Infinity;
+
+    const consider = (entity: CombatEntity, x: number, z: number) => {
+      if (entity.destroyed || entity.team === turret.team) return;
+      const d = Math.hypot(pos.x - x, pos.z - z);
+      if (d <= range && d < bestDist) {
+        bestDist = d;
+        best = entity;
+      }
+    };
+
+    for (const agent of agents) {
+      const p = agent.unit.root.position;
+      consider(agent.unit, p.x, p.z);
+    }
+    for (const slot of slots) {
+      const b = slot.building;
+      if (!b) continue;
+      consider(b, b.root.position.x, b.root.position.z);
+    }
+    // Do not shoot other turrets — keeps lanes about units/buildings
     return best;
   }
 
@@ -671,14 +807,17 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       agent.coinCooldown -= dt;
       if (agent.coinCooldown <= 0) {
         agent.coinCooldown = SUPPLY_TRUCK_COIN_INTERVAL_SEC;
-        addCoins(unit.team, SUPPLY_TRUCK_COIN_AMOUNT, unit.root.position);
+        addCoins(unit.team, SUPPLY_TRUCK_COIN_AMOUNT, {
+          world: unit.root.position.clone(),
+          popup: true,
+        });
       }
 
       if (agent.arrived) {
         const toward = unit.team === "blue" ? 1 : -1;
         agent.moveTarget = {
-          x: toward * (buildingX - 2.2),
-          z: unit.root.position.z + (Math.random() - 0.5) * 0.8,
+          x: unit.root.position.x + (Math.random() - 0.5) * 0.8,
+          z: toward * (buildingZ - 2.2),
         };
         agent.bypass = null;
         agent.arrived = false;
@@ -755,8 +894,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (agent.arrived) {
       const toward = unit.team === "blue" ? 1 : -1;
       agent.moveTarget = {
-        x: toward * (buildingX - 2.2),
-        z: unit.root.position.z + (Math.random() - 0.5) * 0.8,
+        x: unit.root.position.x + (Math.random() - 0.5) * 0.8,
+        z: toward * (buildingZ - 2.2),
       };
       agent.bypass = null;
       agent.arrived = false;
@@ -890,10 +1029,13 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (gameOver || !anyUnitDestroyed) return;
 
     const enemyDead =
-      livingUnits(AI_TEAM).length === 0 && livingBuildings(AI_TEAM).length === 0;
+      livingUnits(AI_TEAM).length === 0 &&
+      livingBuildings(AI_TEAM).length === 0 &&
+      livingTurrets(AI_TEAM).length === 0;
     const playerDead =
       livingUnits(PLAYER_TEAM).length === 0 &&
-      livingBuildings(PLAYER_TEAM).length === 0;
+      livingBuildings(PLAYER_TEAM).length === 0 &&
+      livingTurrets(PLAYER_TEAM).length === 0;
 
     if (enemyDead) {
       gameOver = true;
@@ -961,6 +1103,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   canvas.addEventListener("pointerdown", onPointerDown);
   canvas.addEventListener("pointerup", onPointerUp);
 
+  for (const turret of turrets) wireTurretCombat(turret);
+
   // Wrap takeDamage to detect unit kills for the win gate
   const trackedDestroyed = new WeakSet<UnitHandle>();
   function noteUnitDeath(unit: UnitHandle): void {
@@ -969,13 +1113,43 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     anyUnitDestroyed = true;
   }
 
+  function updateTurret(turret: TurretHandle, hpBar: HpBarHandle): void {
+    if (turret.destroyed) {
+      turret.setAimTarget(null);
+      turretAim.set(turret, null);
+      hpBar.setVisible(false);
+      // Bounty may already have been awarded on the killing blow
+      if (turret.lastAttackerTeam) awardTurretBounty(turret);
+      return;
+    }
+
+    hpBar.setRatio(turret.hp / turret.maxHp);
+    hpBar.update(
+      turret.root.getAbsolutePosition(),
+      TURRET_HP_BAR_HEIGHT,
+      camera.globalPosition,
+    );
+
+    let focus = turretAim.get(turret) ?? null;
+    if (focus?.destroyed) focus = null;
+    if (focus) {
+      const d = distXZ(turret.root.position, focus.root.position);
+      if (d > turret.shootRange) focus = null;
+    }
+    if (!focus) focus = acquireTurretTarget(turret);
+    turretAim.set(turret, focus);
+    turret.setAimTarget(focus);
+  }
+
   let elapsed = 0;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
     elapsed += dt;
     terrain.update(dt, elapsed);
+    hud.update(dt);
 
     if (!gameOver) {
+      // Passive income — HUD tweens; no floating +N
       addCoins(PLAYER_TEAM, COINS_PER_SEC * dt);
       addCoins(AI_TEAM, COINS_PER_SEC * dt);
 
@@ -1003,6 +1177,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     }
 
+    for (let i = 0; i < turrets.length; i++) {
+      updateTurret(turrets[i], turretHpBars[i]);
+      turrets[i].update(dt, elapsed);
+    }
+
     for (const agent of agents) {
       if (agent.unit.destroyed) noteUnitDeath(agent.unit);
       updateAgent(agent, dt);
@@ -1018,6 +1197,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         agents[i].unit.dispose();
         agents.splice(i, 1);
       }
+    }
+
+    for (let i = turrets.length - 1; i >= 0; i--) {
+      if (!turrets[i].expired) continue;
+      turretHpBars[i].dispose();
+      turrets[i].dispose();
+      turrets.splice(i, 1);
+      turretHpBars.splice(i, 1);
     }
 
     checkEndConditions();
@@ -1038,6 +1225,10 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         slot.building?.dispose();
         slot.pickProxy.dispose();
         slot.platform.dispose();
+      }
+      for (let i = 0; i < turrets.length; i++) {
+        turretHpBars[i].dispose();
+        turrets[i].dispose();
       }
       terrain.dispose();
       scene.dispose();
