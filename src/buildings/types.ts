@@ -3,7 +3,7 @@ import type { Team } from "../theme/colors";
 import type { CombatEntity } from "../game/combatEntity";
 import type { UnitKind } from "../game/stats";
 
-export type BuildingKind = "barracks" | "factory" | "helipad";
+export type BuildingKind = "barracks" | "factory" | "helipad" | "depot";
 
 export interface BuildingHandle extends CombatEntity {
   root: TransformNode;
@@ -14,6 +14,9 @@ export interface BuildingHandle extends CombatEntity {
   hp: number;
   maxHp: number;
   takeDamage: (amount: number) => void;
+  /** Owner-initiated teardown (no refund). */
+  beginCollapse: () => void;
+  readonly collapsing: boolean;
   readonly destroyed: boolean;
   readonly expired: boolean;
   update: (dt: number, time: number) => void;

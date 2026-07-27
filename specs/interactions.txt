@@ -1,0 +1,9 @@
+The game starts with 8 empty building platforms (they look like reserved areas where some groundwork is already done). By clicking a platform, a modal shows that renders the buildings and shows the units they produce. There's in-game currency: coins. Coins are gained 2 coins a second. Barracks is cheapest, then the factory and the helipad is most expensive. Buildings can be collapsed (no money back). but it takes some time until the building it teared down.
+
+There's also 4th building + unit type combo: supply truck. The supply truck is as weak as the helicopter. It produces coin every 2 seconds as long it's alive and it shows the coin every time it's generated. It doesn't have any attack.
+
+Game ends when all enemy units and buildings are destroyed. Game over requires at least one unit to be destroyed. Last own building cant be destroyd by the owner.
+
+Enemy AI has same rules and some rudimentary logic that tries to counter the player's moves. It makes decisions once every 10 seconds.
+
+So player can build buildings and collapse buildings at the prellocated sites as long player can afford it. Come up with some balance, then let's adjust.

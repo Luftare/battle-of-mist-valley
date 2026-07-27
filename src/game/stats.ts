@@ -1,6 +1,6 @@
 import type { BuildingKind } from "../buildings/types";
 
-export type UnitKind = "rifleman" | "tank" | "helicopter";
+export type UnitKind = "rifleman" | "tank" | "helicopter" | "supplyTruck";
 
 export interface UnitStats {
   maxHp: number;
@@ -40,6 +40,16 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     radius: 0.55,
     hpBarHeight: 3.4,
   },
+  /** Soft logistics target — same durability as heli, no weapon. */
+  supplyTruck: {
+    maxHp: 45,
+    damage: 0,
+    shootRange: 0,
+    moveSpeed: 1.05,
+    fireRateHz: 0,
+    radius: 0.55,
+    hpBarHeight: 1.45,
+  },
 };
 
 /** Chin-gun damage / rate when heli engages soft targets. */
@@ -61,16 +71,76 @@ export const CORPSE_LIFETIME_SEC = 15;
 export const PLAY_SIZE = 28;
 export const SLOT_COUNT = 8;
 
+/** Passive income for each team. */
+export const COINS_PER_SEC = 2;
+export const STARTING_COINS = 80;
+
+/** Supply trucks mint coins while alive. */
+export const SUPPLY_TRUCK_COIN_INTERVAL_SEC = 2;
+export const SUPPLY_TRUCK_COIN_AMOUNT = 2;
+
+/** Owner-initiated teardown duration (seconds). */
+export const COLLAPSE_DURATION_SEC = 4.5;
+
+/** Enemy AI thinks on this cadence. */
+export const AI_DECISION_INTERVAL_SEC = 10;
+
+/**
+ * Build costs — barracks cheapest, helipad most expensive.
+ * Depot sits between barracks and factory as an economy play.
+ */
+export const BUILDING_COST: Record<BuildingKind, number> = {
+  barracks: 50,
+  depot: 75,
+  factory: 120,
+  helipad: 180,
+};
+
+export const BUILDING_LABEL: Record<BuildingKind, string> = {
+  barracks: "Barracks",
+  depot: "Supply Depot",
+  factory: "Factory",
+  helipad: "Helipad",
+};
+
+export const UNIT_LABEL: Record<UnitKind, string> = {
+  rifleman: "Rifleman",
+  tank: "Tank",
+  helicopter: "Helicopter",
+  supplyTruck: "Supply Truck",
+};
+
+export const BUILDING_BLURB: Record<BuildingKind, string> = {
+  barracks: "Fast infantry. Strong vs helicopters.",
+  depot: "Spawns supply trucks that mint coins.",
+  factory: "Heavy armor. Strong vs infantry.",
+  helipad: "Air support. Strong vs tanks.",
+};
+
 export const BUILDING_TO_UNIT: Record<BuildingKind, UnitKind> = {
   barracks: "rifleman",
+  depot: "supplyTruck",
   factory: "tank",
   helipad: "helicopter",
 };
 
 export const UNIT_TO_BUILDING: Record<UnitKind, BuildingKind> = {
   rifleman: "barracks",
+  supplyTruck: "depot",
   tank: "factory",
   helicopter: "helipad",
 };
 
-export const UNIT_KINDS: UnitKind[] = ["rifleman", "tank", "helicopter"];
+export const UNIT_KINDS: UnitKind[] = [
+  "rifleman",
+  "tank",
+  "helicopter",
+  "supplyTruck",
+];
+
+export const BUILDING_KINDS: BuildingKind[] = [
+  "barracks",
+  "depot",
+  "factory",
+  "helipad",
+];

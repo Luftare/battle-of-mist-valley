@@ -5,14 +5,20 @@ import {
   DirectionalLight,
   Engine,
   HemisphericLight,
+  MeshBuilder,
   Scene,
   Vector3,
+  type Mesh,
 } from "@babylonjs/core";
 import {
   createBarracks,
+  createDepot,
   createFactory,
   createHelipad,
+  createPlatform,
   type BuildingHandle,
+  type BuildingKind,
+  type PlatformHandle,
 } from "../buildings";
 import type { CombatEntity } from "./combatEntity";
 import { createHpBar, type HpBarHandle } from "./hpBar";
@@ -26,27 +32,38 @@ import {
   HELI_GUN_RANGE,
   TANK_SPLASH_RADIUS,
   MISSILE_SPLASH_RADIUS,
-  UNIT_KINDS,
   UNIT_STATS,
-  UNIT_TO_BUILDING,
+  BUILDING_COST,
+  COINS_PER_SEC,
+  STARTING_COINS,
+  SUPPLY_TRUCK_COIN_INTERVAL_SEC,
+  SUPPLY_TRUCK_COIN_AMOUNT,
+  AI_DECISION_INTERVAL_SEC,
   type UnitKind,
 } from "./stats";
 import { spawnExplosion } from "../fx/explosion";
 import { spawnBulletTrace } from "../fx/bulletTrace";
+import { createCoinPopupFx } from "../fx/coinPopup";
 import { createTerrain } from "../terrain/createTerrain";
 import { TEAM_COLORS, type Team } from "../theme/colors";
 import {
   createHelicopter,
   createRifleman,
+  createSupplyTruck,
   createTank,
   type UnitHandle,
 } from "../units";
 import { shortestAngleDelta } from "../units/types";
+import { createHud } from "../ui/hud";
 
 /** Hull yaw rate (rad/s) — tanks turn in place before driving. */
 const TANK_HULL_TURN_SPEED = 0.45;
 /** Must be within this angle of the path before translating. */
 const TANK_ALIGN_RAD = 0.2;
+
+const PLAYER_TEAM: Team = "blue";
+const AI_TEAM: Team = "red";
+const CLICK_DRAG_PX = 12;
 
 export interface GameWorld {
   scene: Scene;
@@ -56,24 +73,28 @@ export interface GameWorld {
 interface Agent {
   unit: UnitHandle;
   hpBar: HpBarHandle;
-  /** Optional hold point; null = advance toward the enemy side. */
   moveTarget: { x: number; z: number } | null;
-  /** Temporary waypoint to slip around a blocking obstacle. */
   bypass: { x: number; z: number } | null;
   arrived: boolean;
-  /** Sticky combat target while still valid / in range. */
   focus: CombatEntity | null;
-  /** Locked enemy unit — chased until dead. */
   lockedUnit: UnitHandle | null;
   stuckTimer: number;
   lastX: number;
   lastZ: number;
+  /** Supply truck coin mint timer. */
+  coinCooldown: number;
 }
 
-interface Spawner {
-  building: BuildingHandle;
-  cooldown: number;
-  slotIndex: number;
+interface Slot {
+  team: Team;
+  index: number;
+  x: number;
+  z: number;
+  rotY: number;
+  platform: PlatformHandle;
+  pickProxy: Mesh;
+  building: BuildingHandle | null;
+  spawnCooldown: number;
 }
 
 function createUnitOfKind(
@@ -84,6 +105,7 @@ function createUnitOfKind(
 ): UnitHandle {
   if (kind === "rifleman") return createRifleman(scene, name, team);
   if (kind === "tank") return createTank(scene, name, team);
+  if (kind === "supplyTruck") return createSupplyTruck(scene, name, team);
   return createHelicopter(scene, name, team);
 }
 
@@ -91,15 +113,12 @@ function createBuildingOfKind(
   scene: Scene,
   name: string,
   team: Team,
-  kind: UnitKind,
+  kind: BuildingKind,
 ): BuildingHandle {
-  if (kind === "rifleman") return createBarracks(scene, name, team);
-  if (kind === "tank") return createFactory(scene, name, team);
+  if (kind === "barracks") return createBarracks(scene, name, team);
+  if (kind === "factory") return createFactory(scene, name, team);
+  if (kind === "depot") return createDepot(scene, name, team);
   return createHelipad(scene, name, team);
-}
-
-function pickRandomKind(): UnitKind {
-  return UNIT_KINDS[Math.floor(Math.random() * UNIT_KINDS.length)];
 }
 
 function distXZ(a: Vector3, b: Vector3): number {
@@ -108,9 +127,12 @@ function distXZ(a: Vector3, b: Vector3): number {
   return Math.hypot(dx, dz);
 }
 
+function spawnIntervalFor(kind: BuildingKind): number {
+  return kind === "barracks" ? BARRACKS_SPAWN_INTERVAL_SEC : SPAWN_INTERVAL_SEC;
+}
+
 /**
- * Auto-battler arena: square field, 8 building slots per side, auto-spawns,
- * obstacle pathing, combat with HP bars, corpse sink.
+ * Auto-battler arena: empty platforms, build/collapse economy, supply trucks, AI.
  */
 export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): GameWorld {
   const scene = new Scene(engine);
@@ -154,9 +176,21 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   const terrain = createTerrain(scene, PLAY_SIZE);
   const agents: Agent[] = [];
-  const buildings: BuildingHandle[] = [];
-  const spawners: Spawner[] = [];
+  const slots: Slot[] = [];
+  const hud = createHud();
+  const coinFx = createCoinPopupFx();
   let unitSeq = 0;
+
+  const coins: Record<Team, number> = {
+    blue: STARTING_COINS,
+    red: STARTING_COINS,
+  };
+  hud.setCoins(coins[PLAYER_TEAM]);
+
+  let anyUnitDestroyed = false;
+  let gameOver = false;
+  let aiCooldown = AI_DECISION_INTERVAL_SEC * 0.4;
+  let selectedSlot: Slot | null = null;
 
   // 8 slots along each side (blue west / red east)
   const zMin = -half + 2.2;
@@ -165,31 +199,150 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     const t = i / Math.max(1, SLOT_COUNT - 1);
     const z = zMin + (zMax - zMin) * t;
     for (const team of ["blue", "red"] as const) {
-      const kind = pickRandomKind();
       const x = team === "blue" ? -buildingX : buildingX;
       const rotY = team === "blue" ? Math.PI / 2 : -Math.PI / 2;
-      const building = createBuildingOfKind(
+      const platform = createPlatform(scene, `${team}_pad_${i}`, team, i);
+      platform.root.position.x = x;
+      platform.root.position.z = z;
+      platform.root.position.y = terrain.sampleGroundY(x, z);
+      platform.root.rotation.y = rotY;
+      platform.root.scaling.setAll(0.85);
+
+      const pickProxy = MeshBuilder.CreateBox(
+        `${team}_pick_${i}`,
+        { width: 2.8, height: 1.6, depth: 2.6 },
         scene,
-        `${team}_${UNIT_TO_BUILDING[kind]}_${i}`,
-        team,
-        kind,
       );
-      building.root.position.x = x;
-      building.root.position.z = z;
-      building.root.position.y = terrain.sampleGroundY(x, z);
-      building.root.rotation.y = rotY;
-      building.root.scaling.setAll(0.85);
-      buildings.push(building);
-      spawners.push({
-        building,
-        // Stagger first wave so the field fills gradually
-        cooldown: 0.4 + Math.random() * 2.5 + i * 0.35,
-        slotIndex: i,
+      pickProxy.parent = platform.root;
+      pickProxy.position.set(0, 0.7, 0);
+      pickProxy.visibility = 0;
+      pickProxy.isPickable = true;
+
+      slots.push({
+        team,
+        index: i,
+        x,
+        z,
+        rotY,
+        platform,
+        pickProxy,
+        building: null,
+        spawnCooldown: 0,
       });
     }
   }
 
+  const pickToSlot = new Map<number, Slot>();
+  function refreshPickMap(): void {
+    pickToSlot.clear();
+    for (const slot of slots) {
+      pickToSlot.set(slot.pickProxy.uniqueId, slot);
+      pickToSlot.set(slot.platform.pickMesh.uniqueId, slot);
+    }
+  }
+  refreshPickMap();
+
+  function livingBuildings(team: Team): BuildingHandle[] {
+    return slots
+      .filter((s) => s.team === team && s.building && !s.building.destroyed)
+      .map((s) => s.building!);
+  }
+
+  function livingUnits(team: Team): UnitHandle[] {
+    return agents.filter((a) => a.unit.team === team && !a.unit.destroyed).map((a) => a.unit);
+  }
+
+  function countUnitsByKind(team: Team): Record<UnitKind, number> {
+    const counts: Record<UnitKind, number> = {
+      rifleman: 0,
+      tank: 0,
+      helicopter: 0,
+      supplyTruck: 0,
+    };
+    for (const u of livingUnits(team)) {
+      counts[u.kind as UnitKind] = (counts[u.kind as UnitKind] ?? 0) + 1;
+    }
+    return counts;
+  }
+
+  function countBuildingsByKind(team: Team): Record<BuildingKind, number> {
+    const counts: Record<BuildingKind, number> = {
+      barracks: 0,
+      depot: 0,
+      factory: 0,
+      helipad: 0,
+    };
+    for (const b of livingBuildings(team)) {
+      counts[b.kind] += 1;
+    }
+    return counts;
+  }
+
+  function addCoins(team: Team, amount: number, at?: Vector3): void {
+    coins[team] += amount;
+    if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
+    if (at) coinFx.spawn(at, amount);
+  }
+
+  function trySpend(team: Team, cost: number): boolean {
+    if (coins[team] < cost) return false;
+    coins[team] -= cost;
+    if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
+    return true;
+  }
+
+  function placeBuilding(
+    slot: Slot,
+    kind: BuildingKind,
+    opts?: { free?: boolean },
+  ): boolean {
+    if (slot.building && !slot.building.expired) return false;
+    if (!opts?.free) {
+      const cost = BUILDING_COST[kind];
+      if (!trySpend(slot.team, cost)) return false;
+    }
+
+    const building = createBuildingOfKind(
+      scene,
+      `${slot.team}_${kind}_${slot.index}`,
+      slot.team,
+      kind,
+    );
+    building.root.position.x = slot.x;
+    building.root.position.z = slot.z;
+    building.root.position.y = terrain.sampleGroundY(slot.x, slot.z);
+    building.root.rotation.y = slot.rotY;
+    building.root.scaling.setAll(0.85);
+    slot.building = building;
+    slot.spawnCooldown = 2.5 + Math.random() * 1.5;
+    return true;
+  }
+
+  // Both sides start with a free barracks on a central platform
+  const starterSlot = Math.floor((SLOT_COUNT - 1) / 2);
+  for (const team of ["blue", "red"] as const) {
+    const slot = slots.find((s) => s.team === team && s.index === starterSlot);
+    if (slot) placeBuilding(slot, "barracks", { free: true });
+  }
+
+  function collapseBuilding(slot: Slot): boolean {
+    const b = slot.building;
+    if (!b || b.destroyed || b.collapsing) return false;
+    if (livingBuildings(slot.team).length <= 1) return false;
+    b.beginCollapse();
+    return true;
+  }
+
+  function clearExpiredBuilding(slot: Slot): void {
+    if (!slot.building?.expired) return;
+    slot.building.dispose();
+    slot.building = null;
+    slot.spawnCooldown = 0;
+  }
+
   function wireUnitCombat(unit: UnitHandle): void {
+    if (unit.kind === "supplyTruck") return;
+
     unit.setOnFire(() => {
       const target = findFocus(unit);
       if (!target || target.destroyed) return;
@@ -199,7 +352,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const isHeliGun = unit.kind === "helicopter";
       const isTankShell = unit.kind === "tank";
       let damage = isHeliGun ? HELI_GUN_DAMAGE : unit.damage;
-      // Infantry are especially effective vs helicopters
       if (
         unit.kind === "rifleman" &&
         "kind" in target &&
@@ -218,7 +370,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         return;
       }
 
-      // Rifle / heli chin-gun: tracer then hitscan damage
       if (unit.kind === "rifleman" || isHeliGun) {
         spawnBulletTrace(scene, muzzlePoint(unit), hit, {
           speed: isHeliGun ? 70 : 58,
@@ -237,9 +388,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     });
   }
 
-  /**
-   * Blast: full damage + impact on the main target; 50% damage to other hostiles in radius.
-   */
   function applyArealHit(
     center: Vector3,
     mainTarget: CombatEntity,
@@ -267,9 +415,10 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const p = other.unit.root.position;
       hitEntity(other.unit, p.x, p.z);
     }
-    for (const b of buildings) {
-      const p = b.root.position;
-      hitEntity(b, p.x, p.z);
+    for (const slot of slots) {
+      const b = slot.building;
+      if (!b) continue;
+      hitEntity(b, b.root.position.x, b.root.position.z);
     }
   }
 
@@ -278,7 +427,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return agent?.focus ?? null;
   }
 
-  /** Approximate world-space muzzle for tracer origin. */
   function muzzlePoint(unit: UnitHandle): Vector3 {
     const yaw = unit.root.rotation.y;
     const sx = Math.sin(yaw);
@@ -291,7 +439,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         body.z + cz * 0.45,
       );
     }
-    // Rifleman chest / rifle tip
     return new Vector3(
       unit.root.position.x + sx * 0.55,
       unit.root.position.y + 1.05,
@@ -299,9 +446,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     );
   }
 
-  function spawnFrom(spawner: Spawner): void {
-    const b = spawner.building;
-    if (b.destroyed) return;
+  function spawnFrom(slot: Slot): void {
+    const b = slot.building;
+    if (!b || b.destroyed) return;
 
     const kind = b.spawns;
     const towardEnemy = b.team === "blue" ? 1 : -1;
@@ -323,7 +470,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     const hpBar = createHpBar(scene, unit.root.name, TEAM_COLORS[b.team].secondary);
     hpBar.setRatio(1);
 
-    // Default: march toward the far side; optional stop short of the building line
     const advanceX = towardEnemy * (buildingX - 3.5);
     const agent: Agent = {
       unit,
@@ -336,6 +482,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       stuckTimer: 0,
       lastX: spawnX,
       lastZ: spawnZ,
+      coinCooldown: SUPPLY_TRUCK_COIN_INTERVAL_SEC * (0.4 + Math.random() * 0.6),
     };
     agents.push(agent);
     wireUnitCombat(unit);
@@ -343,12 +490,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   function canTargetUnit(attacker: UnitHandle, other: UnitHandle): boolean {
     if (other.destroyed || other.team === attacker.team) return false;
-    // Tanks can't engage helicopters
+    if (attacker.kind === "supplyTruck") return false;
     if (attacker.kind === "tank" && other.kind === "helicopter") return false;
     return true;
   }
 
-  /** Weapon reach for this attacker vs a specific target (heli gun is shorter). */
   function engageRange(attacker: UnitHandle, target: CombatEntity): number {
     if (attacker.kind === "helicopter") {
       const isTank =
@@ -358,7 +504,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return attacker.shootRange;
   }
 
-  /** Nearest valid enemy unit within acquire range (used to start a lock). */
   function findUnitToLock(unit: UnitHandle): UnitHandle | null {
     const pos = unit.root.position;
     let best: UnitHandle | null = null;
@@ -379,8 +524,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     const pos = unit.root.position;
     let best: BuildingHandle | null = null;
     let bestDist = Infinity;
-    for (const b of buildings) {
-      if (b.destroyed || b.team === unit.team) continue;
+    for (const slot of slots) {
+      const b = slot.building;
+      if (!b || b.destroyed || b.team === unit.team) continue;
       const range = engageRange(unit, b);
       const d = distXZ(pos, b.root.position);
       if (d <= range && d < bestDist) {
@@ -398,8 +544,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   ): void {
     const { unit } = agent;
     const agentRadius =
-      unit.kind === "tank" ? 0.7 : unit.kind === "helicopter" ? 0 : UNIT_STATS.rifleman.radius;
-    // Tanks ram trees instead of pathing around them; infantry still avoid trunks
+      unit.kind === "tank"
+        ? 0.7
+        : unit.kind === "helicopter"
+          ? 0
+          : UNIT_STATS[unit.kind as UnitKind]?.radius ?? 0.4;
     const obstacles =
       unit.kind === "helicopter"
         ? []
@@ -440,7 +589,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
     const yaw = Math.atan2(dir.x, dir.z);
 
-    // Tanks: turn hull to face the path first, then drive forward
     if (unit.kind === "tank") {
       const dy = shortestAngleDelta(unit.root.rotation.y, yaw);
       unit.root.rotation.y +=
@@ -500,6 +648,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   function updateAgent(agent: Agent, dt: number): void {
     const { unit } = agent;
+
     if (unit.destroyed) {
       unit.setCombat(false);
       unit.setMoving(false);
@@ -517,12 +666,44 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       camera.globalPosition,
     );
 
-    // Drop lock when the chase target dies
+    // Supply trucks: advance + mint coins, never fight
+    if (unit.kind === "supplyTruck") {
+      agent.coinCooldown -= dt;
+      if (agent.coinCooldown <= 0) {
+        agent.coinCooldown = SUPPLY_TRUCK_COIN_INTERVAL_SEC;
+        addCoins(unit.team, SUPPLY_TRUCK_COIN_AMOUNT, unit.root.position);
+      }
+
+      if (agent.arrived) {
+        const toward = unit.team === "blue" ? 1 : -1;
+        agent.moveTarget = {
+          x: toward * (buildingX - 2.2),
+          z: unit.root.position.z + (Math.random() - 0.5) * 0.8,
+        };
+        agent.bypass = null;
+        agent.arrived = false;
+        agent.stuckTimer = 0;
+      }
+      if (agent.moveTarget) {
+        moveToward(agent, agent.moveTarget, dt);
+        if (
+          !agent.bypass &&
+          Math.hypot(
+            unit.root.position.x - agent.moveTarget.x,
+            unit.root.position.z - agent.moveTarget.z,
+          ) < 0.5
+        ) {
+          agent.arrived = true;
+          unit.setMoving(false);
+        }
+      }
+      return;
+    }
+
     if (agent.lockedUnit?.destroyed) {
       agent.lockedUnit = null;
     }
 
-    // Acquire a unit lock if we don't have one
     if (!agent.lockedUnit) {
       agent.lockedUnit = findUnitToLock(unit);
       if (agent.lockedUnit) {
@@ -531,7 +712,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     }
 
-    // Locked unit: chase until dead; shoot when in range
     if (agent.lockedUnit) {
       const locked = agent.lockedUnit;
       agent.focus = locked;
@@ -545,7 +725,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         agent.bypass = null;
         faceTarget(unit, locked, dt);
       } else {
-        // Out of range — keep the lock and chase
         unit.setCombat(false);
         unit.setAimTarget(null);
         moveToward(
@@ -557,7 +736,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       return;
     }
 
-    // No unit lock: opportunistically shoot buildings in range
     const building = findBuildingInRange(unit);
     if (building) {
       agent.focus = building;
@@ -574,7 +752,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.setCombat(false);
     unit.setAimTarget(null);
 
-    // Keep pressing the enemy side
     if (agent.arrived) {
       const toward = unit.team === "blue" ? 1 : -1;
       agent.moveTarget = {
@@ -605,31 +782,236 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     }
   }
 
+  /** Pick a counter building vs the player's current army / economy. */
+  function aiPickBuildKind(): BuildingKind {
+    const enemy = countUnitsByKind(PLAYER_TEAM);
+    const enemyBuildings = countBuildingsByKind(PLAYER_TEAM);
+    const own = countBuildingsByKind(AI_TEAM);
+
+    const combatPressure =
+      enemy.rifleman * 1 + enemy.tank * 2.2 + enemy.helicopter * 1.6;
+    const economyPressure =
+      enemy.supplyTruck * 1.5 + enemyBuildings.depot * 2;
+
+    // Bootstrap: get something on the field
+    if (own.barracks + own.factory + own.helipad + own.depot === 0) {
+      return "barracks";
+    }
+
+    // Economy answer if player is farming hard and we have few depots
+    if (economyPressure > 3 && own.depot < 2 && coins[AI_TEAM] >= BUILDING_COST.depot) {
+      return "depot";
+    }
+
+    // Soft open: second building often a depot for late pressure
+    const combatBuildings = own.barracks + own.factory + own.helipad;
+    if (combatBuildings >= 1 && own.depot === 0 && coins[AI_TEAM] >= BUILDING_COST.depot) {
+      if (Math.random() < 0.45) return "depot";
+    }
+
+    // Counter the dominant combat unit the player fields (or is building)
+    const scores: Record<"rifleman" | "tank" | "helicopter", number> = {
+      rifleman: enemy.rifleman + enemyBuildings.barracks * 1.5,
+      tank: enemy.tank + enemyBuildings.factory * 1.5,
+      helicopter: enemy.helicopter + enemyBuildings.helipad * 1.5,
+    };
+    let dominant: "rifleman" | "tank" | "helicopter" = "rifleman";
+    let best = -1;
+    for (const k of ["rifleman", "tank", "helicopter"] as const) {
+      if (scores[k] > best) {
+        best = scores[k];
+        dominant = k;
+      }
+    }
+
+    let counter: BuildingKind =
+      dominant === "helicopter"
+        ? "barracks"
+        : dominant === "tank"
+          ? "helipad"
+          : "factory";
+
+    // If no real pressure yet, diversify toward barracks / factory
+    if (combatPressure < 1 && best < 1) {
+      counter = own.barracks <= own.factory ? "barracks" : "factory";
+    }
+
+    // Avoid stacking too many of the same if we can afford a different answer
+    if (own[counter] >= 3) {
+      const alts: BuildingKind[] = ["barracks", "factory", "helipad", "depot"];
+      const cheaper = alts
+        .filter((k) => k !== counter && coins[AI_TEAM] >= BUILDING_COST[k])
+        .sort((a, b) => BUILDING_COST[a] - BUILDING_COST[b]);
+      if (cheaper.length) counter = cheaper[0];
+    }
+
+    return counter;
+  }
+
+  function runAiDecision(): void {
+    if (gameOver) return;
+
+    const empty = slots.filter((s) => s.team === AI_TEAM && !s.building);
+    const kind = aiPickBuildKind();
+    const cost = BUILDING_COST[kind];
+
+    // Prefer building on empty sites
+    if (empty.length > 0 && coins[AI_TEAM] >= cost) {
+      const slot = empty[Math.floor(Math.random() * empty.length)];
+      placeBuilding(slot, kind);
+      return;
+    }
+
+    // Rebuild: collapse a poorly matching building if we can afford the counter
+    const living = slots.filter(
+      (s) => s.team === AI_TEAM && s.building && !s.building.destroyed,
+    );
+    if (living.length <= 1) return;
+    if (coins[AI_TEAM] < cost + 20) return;
+
+    const own = countBuildingsByKind(AI_TEAM);
+    // Collapse excess of non-counter types
+    const unwanted = living.filter((s) => s.building!.kind !== kind);
+    if (unwanted.length === 0) return;
+    // Prefer collapsing depots if we already have 2+, else random mismatch
+    unwanted.sort((a, b) => {
+      const score = (s: Slot) =>
+        s.building!.kind === "depot" && own.depot > 1
+          ? 0
+          : s.building!.kind === kind
+            ? 2
+            : 1;
+      return score(a) - score(b);
+    });
+    collapseBuilding(unwanted[0]);
+  }
+
+  function checkEndConditions(): void {
+    if (gameOver || !anyUnitDestroyed) return;
+
+    const enemyDead =
+      livingUnits(AI_TEAM).length === 0 && livingBuildings(AI_TEAM).length === 0;
+    const playerDead =
+      livingUnits(PLAYER_TEAM).length === 0 &&
+      livingBuildings(PLAYER_TEAM).length === 0;
+
+    if (enemyDead) {
+      gameOver = true;
+      hud.showEndScreen("victory");
+    } else if (playerDead) {
+      gameOver = true;
+      hud.showEndScreen("defeat");
+    }
+  }
+
+  function openSlotModal(slot: Slot): void {
+    if (gameOver || slot.team !== PLAYER_TEAM) return;
+    selectedSlot?.platform.setHighlight(false);
+    selectedSlot = slot;
+    slot.platform.setHighlight(true);
+
+    const occupied =
+      slot.building && !slot.building.destroyed ? slot.building.kind : null;
+
+    hud.openBuildModal({
+      coins: coins[PLAYER_TEAM],
+      occupied,
+      canCollapse: occupied !== null && livingBuildings(PLAYER_TEAM).length > 1,
+      onBuild: (kind) => {
+        placeBuilding(slot, kind);
+        slot.platform.setHighlight(false);
+        selectedSlot = null;
+      },
+      onCollapse: () => {
+        collapseBuilding(slot);
+        slot.platform.setHighlight(false);
+        selectedSlot = null;
+      },
+      onClose: () => {
+        slot.platform.setHighlight(false);
+        selectedSlot = null;
+      },
+    });
+  }
+
+  // Click vs drag on platforms
+  let pointerDown: { x: number; y: number } | null = null;
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    pointerDown = { x: e.clientX, y: e.clientY };
+  };
+  const onPointerUp = (e: PointerEvent) => {
+    if (!pointerDown || e.button !== 0) {
+      pointerDown = null;
+      return;
+    }
+    const dx = e.clientX - pointerDown.x;
+    const dy = e.clientY - pointerDown.y;
+    pointerDown = null;
+    if (dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) return;
+    if (gameOver) return;
+
+    const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) =>
+      pickToSlot.has(mesh.uniqueId),
+    );
+    if (!pick?.hit || !pick.pickedMesh) return;
+    const slot = pickToSlot.get(pick.pickedMesh.uniqueId);
+    if (slot) openSlotModal(slot);
+  };
+  canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointerup", onPointerUp);
+
+  // Wrap takeDamage to detect unit kills for the win gate
+  const trackedDestroyed = new WeakSet<UnitHandle>();
+  function noteUnitDeath(unit: UnitHandle): void {
+    if (trackedDestroyed.has(unit)) return;
+    trackedDestroyed.add(unit);
+    anyUnitDestroyed = true;
+  }
+
   let elapsed = 0;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
     elapsed += dt;
     terrain.update(dt, elapsed);
 
-    for (const building of buildings) building.update(dt, elapsed);
+    if (!gameOver) {
+      addCoins(PLAYER_TEAM, COINS_PER_SEC * dt);
+      addCoins(AI_TEAM, COINS_PER_SEC * dt);
 
-    for (const spawner of spawners) {
-      if (spawner.building.destroyed) continue;
-      spawner.cooldown -= dt;
-      if (spawner.cooldown <= 0) {
-        spawnFrom(spawner);
-        spawner.cooldown =
-          spawner.building.kind === "barracks"
-            ? BARRACKS_SPAWN_INTERVAL_SEC
-            : SPAWN_INTERVAL_SEC;
+      aiCooldown -= dt;
+      if (aiCooldown <= 0) {
+        aiCooldown = AI_DECISION_INTERVAL_SEC;
+        runAiDecision();
       }
     }
 
-    for (const agent of agents) updateAgent(agent, dt);
+    for (const slot of slots) {
+      slot.platform.update(dt, elapsed);
+      const b = slot.building;
+      if (!b) continue;
+      b.update(dt, elapsed);
+      if (b.expired) {
+        clearExpiredBuilding(slot);
+        continue;
+      }
+      if (b.destroyed) continue;
+      slot.spawnCooldown -= dt;
+      if (slot.spawnCooldown <= 0) {
+        spawnFrom(slot);
+        slot.spawnCooldown = spawnIntervalFor(b.kind);
+      }
+    }
+
+    for (const agent of agents) {
+      if (agent.unit.destroyed) noteUnitDeath(agent.unit);
+      updateAgent(agent, dt);
+    }
 
     for (const agent of agents) agent.unit.update(dt, elapsed);
 
-    // Cull expired corpses and sunk buildings
+    coinFx.update(dt, scene);
+
     for (let i = agents.length - 1; i >= 0; i--) {
       if (agents[i].unit.expired) {
         agents[i].hpBar.dispose();
@@ -637,25 +1019,26 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         agents.splice(i, 1);
       }
     }
-    for (let i = buildings.length - 1; i >= 0; i--) {
-      if (!buildings[i].expired) continue;
-      const b = buildings[i];
-      for (let s = spawners.length - 1; s >= 0; s--) {
-        if (spawners[s].building === b) spawners.splice(s, 1);
-      }
-      b.dispose();
-      buildings.splice(i, 1);
-    }
+
+    checkEndConditions();
   });
 
   return {
     scene,
     dispose: () => {
+      canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointerup", onPointerUp);
+      hud.dispose();
+      coinFx.dispose();
       for (const agent of agents) {
         agent.hpBar.dispose();
         agent.unit.dispose();
       }
-      for (const building of buildings) building.dispose();
+      for (const slot of slots) {
+        slot.building?.dispose();
+        slot.pickProxy.dispose();
+        slot.platform.dispose();
+      }
       terrain.dispose();
       scene.dispose();
     },
