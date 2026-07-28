@@ -17,14 +17,14 @@ import { createUnitShadow } from "./shadow";
 import { approach, shortestAngleDelta, type UnitHandle } from "./types";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 
-const TANK_FIRE_HZ = 0.5;
+const TANK_FIRE_HZ = 0.25;
 const TURRET_AIM_SPEED = 0.55;
 const BARREL_PITCH_LIMIT = 0.55; // ~31° up/down
 const AIM_ALIGN_RAD = 0.06;
 
 /**
  * Blocky tank with a rotating turret and idle rumble.
- * Combat: turret aims at the enemy, then fires at 0.5Hz once aligned.
+ * Combat: turret aims at the enemy, then fires at 0.25Hz once aligned.
  * Destroy: hull tips, turret (and gun) launches off with randomized debris motion.
  */
 export function createTank(scene: Scene, name: string, team: Team): UnitHandle {

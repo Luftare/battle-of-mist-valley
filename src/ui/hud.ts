@@ -429,8 +429,8 @@ export function createHud(): HudHandle {
           <h2>${result === "victory" ? "Victory" : "Defeat"}</h2>
           <p>${
             result === "victory"
-              ? "Enemy forces wiped out."
-              : "Your bases and army are gone."
+              ? "Enemy bases destroyed."
+              : "Your bases are gone."
           }</p>
           <button type="button" class="btn btn-primary" id="endReload">Play again</button>
         </div>

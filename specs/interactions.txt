@@ -2,7 +2,7 @@ The game starts with 8 empty building platforms (they look like reserved areas w
 
 There's also 4th building + unit type combo: supply truck. The supply truck is as weak as the helicopter. It produces coin every 2 seconds as long it's alive and it shows the coin every time it's generated. It doesn't have any attack.
 
-Game ends when all enemy units and buildings are destroyed. Game over requires at least one unit to be destroyed. Last own building cant be destroyd by the owner.
+Game ends when a side has no buildings left — remaining units do not save them. Game over requires at least one building to have been destroyed. Last own building cant be destroyd by the owner.
 
 Enemy AI has same rules and some rudimentary logic that tries to counter the player's moves. It makes decisions once every 10 seconds.
 

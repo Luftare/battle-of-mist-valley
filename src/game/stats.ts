@@ -27,7 +27,7 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     damage: 35,
     shootRange: 7.5,
     moveSpeed: 0.95,
-    fireRateHz: 0.5,
+    fireRateHz: 0.25,
     radius: 0.75,
     hpBarHeight: 1.35,
   },
@@ -85,8 +85,8 @@ export const BUILDING_RADIUS = 1.15;
 /** World-space HP bar height above the building root. */
 export const BUILDING_HP_BAR_HEIGHT = 2.15;
 export const SPAWN_INTERVAL_SEC = 15;
-/** Barracks produce infantry twice as fast as other buildings. */
-export const BARRACKS_SPAWN_INTERVAL_SEC = SPAWN_INTERVAL_SEC / 2;
+/** Factory tanks take longer to roll off the line. */
+export const FACTORY_SPAWN_INTERVAL_SEC = SPAWN_INTERVAL_SEC * 1.5;
 export const CORPSE_LIFETIME_SEC = 15;
 /** East–west playfield width (building rows span this). */
 export const PLAY_WIDTH = 36;

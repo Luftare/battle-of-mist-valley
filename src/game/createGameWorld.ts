@@ -37,7 +37,7 @@ import {
   FLAG_COINS_PER_SEC,
   SLOT_COUNT,
   SPAWN_INTERVAL_SEC,
-  BARRACKS_SPAWN_INTERVAL_SEC,
+  FACTORY_SPAWN_INTERVAL_SEC,
   HELI_GUN_DAMAGE,
   HELI_GUN_RANGE,
   TANK_SPLASH_RADIUS,
@@ -65,6 +65,7 @@ import {
   SUPPLY_SPEED_BONUS_PER_LEVEL,
   TANK_HP_MUL,
   TANK_SPLASH_MUL,
+  TANK_FIRE_RATE_MUL,
   TURRET_RANGE_MUL,
   TURRET_REGEN_DELAY_SEC,
   TURRET_REGEN_HP_PER_SEC,
@@ -203,10 +204,10 @@ function scatterAim(from: Vector3, aim: Vector3, radius = MISS_SCATTER_RADIUS): 
 
 function spawnIntervalFor(kind: BuildingKind, infantryProdBonus = false): number {
   if (kind === "researchLab") return Infinity;
-  if (kind === "barracks") {
-    const base = BARRACKS_SPAWN_INTERVAL_SEC;
-    return infantryProdBonus ? base / INFANTRY_PROD_MUL : base;
+  if (kind === "barracks" && infantryProdBonus) {
+    return SPAWN_INTERVAL_SEC / INFANTRY_PROD_MUL;
   }
+  if (kind === "factory") return FACTORY_SPAWN_INTERVAL_SEC;
   return SPAWN_INTERVAL_SEC;
 }
 
@@ -301,7 +302,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   const turretLastHurt = new WeakMap<TurretHandle, number>();
   let researchModalOpen = false;
 
-  let anyUnitDestroyed = false;
+  let anyBuildingDestroyed = false;
   let gameOver = false;
   let aiCooldown = AI_DECISION_INTERVAL_SEC * 0.4;
   let flagCoinCooldown = 0;
@@ -386,10 +387,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       .map((s) => s.building!);
   }
 
-  function livingTurrets(team: Team): TurretHandle[] {
-    return turrets.filter((t) => t.team === team && !t.destroyed);
-  }
-
   function livingUnits(team: Team): UnitHandle[] {
     return agents.filter((a) => a.unit.team === team && !a.unit.destroyed).map((a) => a.unit);
   }
@@ -455,6 +452,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     }
   }
 
+  function tankFireRateHz(team: Team): number {
+    const base = UNIT_STATS.tank.fireRateHz;
+    return techLevels[team].tankFireRate > 0 ? base * TANK_FIRE_RATE_MUL : base;
+  }
+
   function applyUpgradeEffect(team: Team, id: UpgradeId): void {
     if (id === "heliMissiles") {
       for (const agent of agents) {
@@ -478,6 +480,17 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
           !agent.unit.destroyed
         ) {
           agent.unit.applyMaxHpBonus(TANK_HP_MUL);
+        }
+      }
+    }
+    if (id === "tankFireRate") {
+      for (const agent of agents) {
+        if (
+          agent.unit.team === team &&
+          agent.unit.kind === "tank" &&
+          !agent.unit.destroyed
+        ) {
+          agent.unit.fireRateHz = tankFireRateHz(team);
         }
       }
     }
@@ -824,7 +837,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.root.position.y = terrain.getGroundYAt(spawnX, spawnZ);
     unit.root.rotation.y = towardEnemy > 0 ? 0 : Math.PI;
     unit.root.scaling.setAll(0.8);
-    unit.fireRateHz = UNIT_STATS[kind].fireRateHz;
+    unit.fireRateHz =
+      kind === "tank" ? tankFireRateHz(b.team) : UNIT_STATS[kind].fireRateHz;
 
     if (kind === "tank" && techLevels[b.team].tankHp > 0) {
       unit.applyMaxHpBonus(TANK_HP_MUL);
@@ -1259,7 +1273,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       camera.globalPosition,
     );
 
-    // Supply trucks: advance + mint coins, never fight
+    // Supply trucks: advance + mint coins, never fight — despawn on arrival
     if (unit.kind === "supplyTruck") {
       agent.coinCooldown -= dt;
       if (agent.coinCooldown <= 0) {
@@ -1273,28 +1287,26 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         });
       }
 
-      if (agent.arrived) {
-        const toward = unit.team === "blue" ? 1 : -1;
-        agent.moveTarget = {
-          x: unit.root.position.x + (Math.random() - 0.5) * 0.8,
-          z: toward * (buildingZ - 2.2),
-        };
-        agent.bypass = null;
-        agent.arrived = false;
-        agent.stuckTimer = 0;
+      if (agent.arrived || !agent.moveTarget) {
+        unit.setMoving(false);
+        unit.destroy();
+        agent.hpBar.setVisible(false);
+        return;
       }
-      if (agent.moveTarget) {
-        moveToward(agent, agent.moveTarget, dt);
-        if (
-          !agent.bypass &&
-          Math.hypot(
-            unit.root.position.x - agent.moveTarget.x,
-            unit.root.position.z - agent.moveTarget.z,
-          ) < 0.5
-        ) {
-          agent.arrived = true;
-          unit.setMoving(false);
-        }
+
+      moveToward(agent, agent.moveTarget, dt);
+      if (
+        !agent.bypass &&
+        Math.hypot(
+          unit.root.position.x - agent.moveTarget.x,
+          unit.root.position.z - agent.moveTarget.z,
+        ) < 0.5
+      ) {
+        agent.arrived = true;
+        agent.moveTarget = null;
+        unit.setMoving(false);
+        unit.destroy();
+        agent.hpBar.setVisible(false);
       }
       return;
     }
@@ -1523,6 +1535,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       if (id === "infantryProd" && own.barracks > 0) score = 2.8;
       if (id === "tankHp" && (own.factory > 0 || ownUnits.tank > 0)) score = 3;
       if (id === "tankSplash" && own.factory > 0) score = 2.6;
+      if (id === "tankFireRate" && (own.factory > 0 || ownUnits.tank > 0)) score = 2.9;
       if (id === "heliMissiles" && (own.helipad > 0 || enemy.tank > 2)) score = 3.5;
       if (id === "turretRange") score = 2.2;
       if (id === "turretRegen") score = 2;
@@ -1581,16 +1594,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   }
 
   function checkEndConditions(): void {
-    if (gameOver || !anyUnitDestroyed) return;
+    if (gameOver || !anyBuildingDestroyed) return;
 
-    const enemyDead =
-      livingUnits(AI_TEAM).length === 0 &&
-      livingBuildings(AI_TEAM).length === 0 &&
-      livingTurrets(AI_TEAM).length === 0;
-    const playerDead =
-      livingUnits(PLAYER_TEAM).length === 0 &&
-      livingBuildings(PLAYER_TEAM).length === 0 &&
-      livingTurrets(PLAYER_TEAM).length === 0;
+    // Structures only — leftover units do not keep a team alive
+    const enemyDead = livingBuildings(AI_TEAM).length === 0;
+    const playerDead = livingBuildings(PLAYER_TEAM).length === 0;
 
     if (enemyDead) {
       gameOver = true;
@@ -1668,12 +1676,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   for (const turret of turrets) wireTurretCombat(turret);
 
-  // Wrap takeDamage to detect unit kills for the win gate
-  const trackedDestroyed = new WeakSet<UnitHandle>();
-  function noteUnitDeath(unit: UnitHandle): void {
-    if (trackedDestroyed.has(unit)) return;
-    trackedDestroyed.add(unit);
-    anyUnitDestroyed = true;
+  const notedDestroyedBuildings = new WeakSet<BuildingHandle>();
+  function noteBuildingDeath(building: BuildingHandle): void {
+    if (notedDestroyedBuildings.has(building)) return;
+    notedDestroyedBuildings.add(building);
+    anyBuildingDestroyed = true;
   }
 
   function updateTurret(turret: TurretHandle, hpBar: HpBarHandle, dt: number): void {
@@ -1781,6 +1788,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         continue;
       }
       if (b.destroyed) {
+        noteBuildingDeath(b);
         slot.hpBar?.setVisible(false);
         continue;
       }
@@ -1849,7 +1857,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
 
       for (const agent of agents) {
-        if (agent.unit.destroyed) noteUnitDeath(agent.unit);
         updateAgent(agent, dt);
       }
       resolveUnitSeparation(dt);

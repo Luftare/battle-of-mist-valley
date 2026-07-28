@@ -11,6 +11,7 @@ export type UpgradeId =
   | "heliMissiles"
   | "infantryProd"
   | "tankSplash"
+  | "tankFireRate"
   | "turretRange"
   | "turretRegen";
 
@@ -38,6 +39,8 @@ export const TANK_HP_MUL = 1.5;
 export const INFANTRY_PROD_MUL = 1.4;
 /** Heavy Shells multiplies tank splash radius. */
 export const TANK_SPLASH_MUL = 3;
+/** Autoloaders doubles tank fire rate. */
+export const TANK_FIRE_RATE_MUL = 2;
 /** Extended Optics multiplies turret engagement range. */
 export const TURRET_RANGE_MUL = 1.5;
 
@@ -91,6 +94,14 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
     durationSec: 15,
     maxLevel: 1,
   },
+  tankFireRate: {
+    id: "tankFireRate",
+    label: "Autoloaders",
+    blurb: "Tanks fire 2× faster.",
+    cost: 155,
+    durationSec: 14,
+    maxLevel: 1,
+  },
   turretRange: {
     id: "turretRange",
     label: "Extended Optics",
@@ -116,6 +127,7 @@ export const UPGRADE_IDS: UpgradeId[] = [
   "heliMissiles",
   "infantryProd",
   "tankSplash",
+  "tankFireRate",
   "turretRange",
   "turretRegen",
 ];
@@ -137,6 +149,7 @@ export function createTeamTechLevels(): Record<UpgradeId, number> {
     heliMissiles: 0,
     infantryProd: 0,
     tankSplash: 0,
+    tankFireRate: 0,
     turretRange: 0,
     turretRegen: 0,
   };
