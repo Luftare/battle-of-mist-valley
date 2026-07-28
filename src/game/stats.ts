@@ -55,8 +55,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
 /** Chin-gun damage / rate when heli engages soft targets. */
 export const HELI_GUN_DAMAGE = 11;
 export const HELI_GUN_FIRE_HZ = 5.5;
-/** Chin-gun reach: 80% of rifleman range. */
-export const HELI_GUN_RANGE = UNIT_STATS.rifleman.shootRange * 0.8;
+/** Chin-gun reach: 80% of rifleman range, then +25%. */
+export const HELI_GUN_RANGE = UNIT_STATS.rifleman.shootRange * 0.8 * 1.25;
 
 /** Splash radii for areal weapons (tank shell / heli missile). */
 export const TANK_SPLASH_RADIUS = 2.2;
