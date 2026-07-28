@@ -32,9 +32,9 @@ export function spawnBulletTrace(
   if (dist < 0.15) return;
 
   const speed = opts?.speed ?? 55;
-  const length = opts?.length ?? Math.min(1.35, 0.35 + dist * 0.12);
-  const thickness = opts?.thickness ?? 0.045;
-  const color = opts?.color ?? "#ffe08a";
+  const length = opts?.length ?? Math.min(1.6, 0.45 + dist * 0.14);
+  const thickness = opts?.thickness ?? 0.07;
+  const color = opts?.color ?? "#fff6c8";
 
   const dirX = dx / dist;
   const dirY = dy / dist;
@@ -43,11 +43,14 @@ export function spawnBulletTrace(
   const root = new TransformNode(`fx_trace_${Math.random().toString(36).slice(2, 8)}`, scene);
   root.position.copyFrom(from);
 
+  const tint = Color3.FromHexString(color);
   const mat = new StandardMaterial(`${root.name}_mat`, scene);
-  mat.diffuseColor = Color3.FromHexString(color);
-  mat.emissiveColor = Color3.FromHexString(color).scale(0.95);
+  mat.diffuseColor = tint;
+  mat.emissiveColor = tint;
+  mat.ambientColor = tint;
   mat.specularColor = Color3.Black();
   mat.disableLighting = true;
+  mat.alpha = 1;
 
   const streak = MeshBuilder.CreateBox(
     `${root.name}_streak`,

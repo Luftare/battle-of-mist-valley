@@ -22,11 +22,17 @@ import {
   type PlatformHandle,
   type TurretHandle,
 } from "../buildings";
+import { createCaptureFlag } from "../buildings/captureFlag";
 import type { CombatEntity } from "./combatEntity";
 import { createHpBar, type HpBarHandle } from "./hpBar";
 import { bypassAroundObstacle, clampToPlayfield, steerToward } from "./pathfinding";
 import {
-  PLAY_SIZE,
+  PLAY_WIDTH,
+  PLAY_DEPTH,
+  TURRETS_PER_TEAM,
+  TURRET_FORWARD_FROM_BASE,
+  FLAG_CAPTURE_RADIUS,
+  FLAG_COINS_PER_SEC,
   SLOT_COUNT,
   SPAWN_INTERVAL_SEC,
   BARRACKS_SPAWN_INTERVAL_SEC,
@@ -34,8 +40,12 @@ import {
   HELI_GUN_RANGE,
   TANK_SPLASH_RADIUS,
   MISSILE_SPLASH_RADIUS,
+  ACCURACY_AT_POINT_BLANK,
+  ACCURACY_AT_MAX_RANGE,
+  MISS_SCATTER_RADIUS,
   UNIT_STATS,
   BUILDING_COST,
+  BUILDING_HP_BAR_HEIGHT,
   COINS_PER_SEC,
   STARTING_COINS,
   SUPPLY_TRUCK_COIN_INTERVAL_SEC,
@@ -49,7 +59,7 @@ import { spawnExplosion } from "../fx/explosion";
 import { spawnBulletTrace } from "../fx/bulletTrace";
 import { createCoinPopupFx } from "../fx/coinPopup";
 import { createTerrain } from "../terrain/createTerrain";
-import { TEAM_COLORS, type Team } from "../theme/colors";
+import { type Team } from "../theme/colors";
 import {
   createHelicopter,
   createRifleman,
@@ -64,6 +74,12 @@ import { createHud } from "../ui/hud";
 const TANK_HULL_TURN_SPEED = 0.45;
 /** Must be within this angle of the path before translating. */
 const TANK_ALIGN_RAD = 0.2;
+/** Extra personal space beyond body radii for unit–unit evasion. */
+const UNIT_SEP_PADDING = 0.28;
+/** How strongly neighbor repulsion bends movement steering. */
+const UNIT_SEP_STEER = 1.35;
+/** How fast hard overlaps are resolved (fraction of push per second). */
+const UNIT_SEP_RESOLVE = 7;
 
 const PLAYER_TEAM: Team = "blue";
 const AI_TEAM: Team = "red";
@@ -99,6 +115,7 @@ interface Slot {
   platform: PlatformHandle;
   pickProxy: Mesh;
   building: BuildingHandle | null;
+  hpBar: HpBarHandle | null;
   spawnCooldown: number;
 }
 
@@ -132,6 +149,34 @@ function distXZ(a: Vector3, b: Vector3): number {
   return Math.hypot(dx, dz);
 }
 
+/** Linear accuracy: 100% at 0 range → 50% at maxRange. */
+function rollAccuracy(distance: number, maxRange: number): boolean {
+  const t =
+    maxRange <= 1e-6 ? 0 : Math.min(1, Math.max(0, distance / maxRange));
+  const accuracy =
+    ACCURACY_AT_POINT_BLANK +
+    (ACCURACY_AT_MAX_RANGE - ACCURACY_AT_POINT_BLANK) * t;
+  return Math.random() < accuracy;
+}
+
+/** Aim point offset when a shot misses (mostly lateral to the shot line). */
+function scatterAim(from: Vector3, aim: Vector3, radius = MISS_SCATTER_RADIUS): Vector3 {
+  const dx = aim.x - from.x;
+  const dz = aim.z - from.z;
+  const len = Math.hypot(dx, dz) || 1;
+  const fx = dx / len;
+  const fz = dz / len;
+  const px = -fz;
+  const pz = fx;
+  const lat = (Math.random() * 2 - 1) * radius;
+  const along = (Math.random() * 2 - 1) * radius * 0.4;
+  return new Vector3(
+    aim.x + px * lat + fx * along,
+    aim.y + (Math.random() - 0.5) * radius * 0.3,
+    aim.z + pz * lat + fz * along,
+  );
+}
+
 function spawnIntervalFor(kind: BuildingKind): number {
   return kind === "barracks" ? BARRACKS_SPAWN_INTERVAL_SEC : SPAWN_INTERVAL_SEC;
 }
@@ -145,29 +190,42 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   scene.ambientColor = new Color3(0.35, 0.4, 0.32);
   scene.fogMode = Scene.FOGMODE_LINEAR;
   scene.fogColor = new Color3(0.62, 0.75, 0.88);
-  scene.fogStart = 32;
-  scene.fogEnd = 62;
+  scene.fogStart = 30;
+  scene.fogEnd = 50;
 
-  const half = PLAY_SIZE * 0.5;
+  const halfX = PLAY_WIDTH * 0.5;
+  const halfZ = PLAY_DEPTH * 0.5;
   /** Base line along Z: blue south (−Z), red north (+Z). */
-  const buildingZ = half - 2.4;
+  const buildingZ = halfZ - 2.4;
+
+  // Locked isometric view — drag pans the target; angle/zoom stay fixed
+  // ~30° off pure south so own (blue) side is nearer the camera
+  const CAM_ALPHA = Math.PI + Math.PI / 3;
+  const CAM_BETA = 0.95;
+  const CAM_RADIUS = 42;
 
   const camera = new ArcRotateCamera(
     "gameCamera",
-    Math.PI,
-    0.85,
-    30,
+    CAM_ALPHA,
+    CAM_BETA,
+    CAM_RADIUS,
     new Vector3(0, 0.4, 0),
     scene,
   );
-  camera.lowerBetaLimit = 0.4;
-  camera.upperBetaLimit = 1.2;
-  camera.lowerRadiusLimit = 16;
-  camera.upperRadiusLimit = 48;
-  camera.wheelPrecision = 35;
-  camera.pinchPrecision = 70;
-  camera.panningSensibility = 70;
-  camera.attachControl(canvas, true);
+  camera.lowerAlphaLimit = CAM_ALPHA;
+  camera.upperAlphaLimit = CAM_ALPHA;
+  camera.lowerBetaLimit = CAM_BETA;
+  camera.upperBetaLimit = CAM_BETA;
+  camera.lowerRadiusLimit = CAM_RADIUS;
+  camera.upperRadiusLimit = CAM_RADIUS;
+  camera.panningAxis = new Vector3(1, 0, 1);
+  camera.mapPanning = true;
+  camera.panningSensibility = 55;
+  camera.panningInertia = 0.6;
+  camera.panningDistanceLimit = Math.hypot(halfX, halfZ) - 4;
+  // Left-drag pans (no Ctrl / no orbit). Wheel zoom removed below.
+  camera.attachControl(true, false, 0);
+  camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
   camera.useInputToRestoreState = false;
 
   const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.3), scene);
@@ -180,7 +238,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   sun.intensity = 0.85;
   sun.diffuse = new Color3(1, 0.97, 0.9);
 
-  const terrain = createTerrain(scene, PLAY_SIZE);
+  const terrain = createTerrain(scene, PLAY_WIDTH, PLAY_DEPTH);
+  const captureFlag = createCaptureFlag(scene, terrain.getGroundYAt);
   const agents: Agent[] = [];
   const slots: Slot[] = [];
   const turrets: TurretHandle[] = [];
@@ -198,11 +257,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   let anyUnitDestroyed = false;
   let gameOver = false;
   let aiCooldown = AI_DECISION_INTERVAL_SEC * 0.4;
+  let flagCoinCooldown = 0;
   let selectedSlot: Slot | null = null;
 
   // 8 slots along each end (blue south / red north)
-  const xMin = -half + 2.2;
-  const xMax = half - 2.2;
+  const xMin = -halfX + 2.2;
+  const xMax = halfX - 2.2;
   for (let i = 0; i < SLOT_COUNT; i++) {
     const t = i / Math.max(1, SLOT_COUNT - 1);
     const x = xMin + (xMax - xMin) * t;
@@ -235,28 +295,29 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         platform,
         pickProxy,
         building: null,
+        hpBar: null,
         spawnCooldown: 0,
       });
     }
   }
 
-  // Two defensive turrets per team, ahead of the building line
-  const turretX = half * 0.42;
-  const turretZ = half * 0.38;
+  // Three defensive turrets per team, evenly spaced just ahead of the base
   for (const team of ["blue", "red"] as const) {
     const zSign = team === "blue" ? -1 : 1;
-    for (const xSign of [-1, 1] as const) {
-      const tx = xSign * turretX;
-      const tz = zSign * turretZ;
-      const turret = createTurret(scene, `${team}_turret_${xSign > 0 ? "E" : "W"}`, team);
+    const tz = zSign * (buildingZ - TURRET_FORWARD_FROM_BASE);
+    for (let i = 0; i < TURRETS_PER_TEAM; i++) {
+      const t = TURRETS_PER_TEAM <= 1 ? 0.5 : i / (TURRETS_PER_TEAM - 1);
+      const tx = xMin + (xMax - xMin) * t;
+      const label =
+        i === 0 ? "W" : i === TURRETS_PER_TEAM - 1 ? "E" : `M${i}`;
+      const turret = createTurret(scene, `${team}_turret_${label}`, team);
       turret.root.position.x = tx;
       turret.root.position.z = tz;
-      // Pad diameter 2.1 × 0.9 scale — sample max height so pads stay on slopes
       turret.root.position.y = terrain.getGroundYAtFootprint(tx, tz, 2.1 * 0.5 * 0.9);
       turret.root.scaling.setAll(0.9);
       turrets.push(turret);
 
-      const hpBar = createHpBar(scene, turret.root.name, TEAM_COLORS[team].secondary);
+      const hpBar = createHpBar(scene, turret.root.name);
       hpBar.setRatio(1);
       turretHpBars.push(hpBar);
     }
@@ -324,7 +385,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   ): void {
     coins[team] += amount;
     if (team === PLAYER_TEAM) hud.setCoins(coins[PLAYER_TEAM]);
-    if (opts?.popup && (opts.follow || opts.world)) {
+    // Only the player sees floating coin numbers
+    if (
+      team === PLAYER_TEAM &&
+      opts?.popup &&
+      (opts.follow || opts.world)
+    ) {
       coinFx.spawn(opts.world ?? opts.follow!(), amount, {
         follow: opts.follow,
       });
@@ -362,6 +428,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     kind: BuildingKind,
     opts?: { free?: boolean },
   ): boolean {
+    if (slot.building?.expired) clearExpiredBuilding(slot);
     if (slot.building && !slot.building.expired) return false;
     if (!opts?.free) {
       const cost = BUILDING_COST[kind];
@@ -380,16 +447,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     building.root.rotation.y = slot.rotY;
     building.root.scaling.setAll(0.85);
     slot.building = building;
+    const hpBar = createHpBar(scene, building.root.name);
+    hpBar.setRatio(1);
+    slot.hpBar = hpBar;
     slot.spawnCooldown = 2.5 + Math.random() * 1.5;
     return true;
   }
 
-  // Both sides start with a free barracks on a central platform
-  const starterSlot = Math.floor((SLOT_COUNT - 1) / 2);
-  for (const team of ["blue", "red"] as const) {
-    const slot = slots.find((s) => s.team === team && s.index === starterSlot);
-    if (slot) placeBuilding(slot, "barracks", { free: true });
-  }
+  // Both sides start with empty platforms — player/AI choose what to build
 
   function collapseBuilding(slot: Slot): boolean {
     const b = slot.building;
@@ -401,6 +466,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   function clearExpiredBuilding(slot: Slot): void {
     if (!slot.building?.expired) return;
+    slot.hpBar?.dispose();
+    slot.hpBar = null;
     slot.building.dispose();
     slot.building = null;
     slot.spawnCooldown = 0;
@@ -426,24 +493,38 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         damage *= 2;
       }
 
+      const maxRange = engageRange(unit, target);
+      const didHit = rollAccuracy(distXZ(from, hit), maxRange);
+      const impactAt = didHit ? hit : scatterAim(from, hit);
+
       if (isTankShell) {
-        spawnExplosion(scene, hit, { scale: 1.15, duration: 0.55 });
-        applyArealHit(hit, target, damage, TANK_SPLASH_RADIUS, unit.team, {
-          impactFromX: from.x,
-          impactFromZ: from.z,
-          impactStrength: 8.5,
-        });
+        // Misses still detonate as splash AOE (no guaranteed primary hit)
+        spawnExplosion(scene, impactAt, { scale: 1.15, duration: 0.55 });
+        applyArealHit(
+          impactAt,
+          didHit ? target : null,
+          damage,
+          TANK_SPLASH_RADIUS,
+          unit.team,
+          {
+            impactFromX: from.x,
+            impactFromZ: from.z,
+            impactStrength: 8.5,
+          },
+        );
         return;
       }
 
       if (unit.kind === "rifleman" || isHeliGun) {
-        spawnBulletTrace(scene, muzzlePoint(unit), hit, {
+        spawnBulletTrace(scene, unit.getMuzzlePoint().clone(), impactAt, {
           speed: isHeliGun ? 70 : 58,
-          length: isHeliGun ? 1.1 : 0.95,
-          thickness: isHeliGun ? 0.04 : 0.035,
-          color: isHeliGun ? "#ffd060" : "#fff0a8",
+          length: isHeliGun ? 1.45 : 1.25,
+          thickness: isHeliGun ? 0.08 : 0.07,
+          color: isHeliGun ? "#ffe9a0" : "#fff8d8",
         });
       }
+
+      if (!didHit) return;
 
       markAttacker(target, unit.team);
       const wasAlive = !target.destroyed;
@@ -454,6 +535,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     });
 
     unit.setOnMissileHit((target, hit) => {
+      // Guided missiles always hit
       spawnExplosion(scene, hit, { scale: 1.55, duration: 0.7 });
       applyArealHit(hit, target, unit.damage, MISSILE_SPLASH_RADIUS, unit.team);
     });
@@ -468,12 +550,16 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const target = findTurretFocus(turret);
       if (!target || target.destroyed) return;
       const hit = target.getHitPoint();
-      spawnBulletTrace(scene, turret.getMuzzlePoint().clone(), hit, {
+      const from = turret.root.position;
+      const didHit = rollAccuracy(distXZ(from, hit), turret.shootRange);
+      const impactAt = didHit ? hit : scatterAim(from, hit);
+      spawnBulletTrace(scene, turret.getMuzzlePoint().clone(), impactAt, {
         speed: 62,
-        length: 1.0,
-        thickness: 0.04,
-        color: "#ffe08a",
+        length: 1.35,
+        thickness: 0.075,
+        color: "#fff4b8",
       });
+      if (!didHit) return;
       // Equal damage vs all targets — no type multipliers
       target.takeDamage(turret.damage);
     });
@@ -489,7 +575,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   function applyArealHit(
     center: Vector3,
-    mainTarget: CombatEntity,
+    mainTarget: CombatEntity | null,
     baseDamage: number,
     radius: number,
     attackerTeam: Team,
@@ -497,7 +583,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   ): void {
     const hitEntity = (entity: CombatEntity, x: number, z: number) => {
       if (entity.destroyed || entity.team === attackerTeam) return;
-      const isMain = entity === mainTarget;
+      const isMain = mainTarget !== null && entity === mainTarget;
       if (!isMain) {
         const d = Math.hypot(center.x - x, center.z - z);
         if (d > radius) return;
@@ -534,25 +620,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return agent?.focus ?? null;
   }
 
-  function muzzlePoint(unit: UnitHandle): Vector3 {
-    const yaw = unit.root.rotation.y;
-    const sx = Math.sin(yaw);
-    const cz = Math.cos(yaw);
-    if (unit.kind === "helicopter") {
-      const body = unit.getHitPoint();
-      return new Vector3(
-        body.x + sx * 0.45,
-        body.y - 0.32,
-        body.z + cz * 0.45,
-      );
-    }
-    return new Vector3(
-      unit.root.position.x + sx * 0.55,
-      unit.root.position.y + 1.05,
-      unit.root.position.z + cz * 0.55,
-    );
-  }
-
   function spawnFrom(slot: Slot): void {
     const b = slot.building;
     if (!b || b.destroyed) return;
@@ -574,7 +641,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.root.scaling.setAll(0.8);
     unit.fireRateHz = UNIT_STATS[kind].fireRateHz;
 
-    const hpBar = createHpBar(scene, unit.root.name, TEAM_COLORS[b.team].secondary);
+    const hpBar = createHpBar(scene, unit.root.name);
     hpBar.setRatio(1);
 
     const advanceZ = towardEnemy * (buildingZ - 3.5);
@@ -653,6 +720,23 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return best;
   }
 
+  /** Nearest living enemy build-slot structure (for base assault after arrival). */
+  function findClosestEnemyBuilding(unit: UnitHandle): BuildingHandle | null {
+    const pos = unit.root.position;
+    let best: BuildingHandle | null = null;
+    let bestDist = Infinity;
+    for (const slot of slots) {
+      const b = slot.building;
+      if (!b || b.destroyed || b.team === unit.team) continue;
+      const d = distXZ(pos, b.root.position);
+      if (d < bestDist) {
+        bestDist = d;
+        best = b;
+      }
+    }
+    return best;
+  }
+
   /** Nearest hostile for a turret — units and buildings treated equally. */
   function acquireTurretTarget(turret: TurretHandle): CombatEntity | null {
     const pos = turret.root.position;
@@ -682,6 +766,104 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return best;
   }
 
+  function bodyRadius(unit: UnitHandle): number {
+    return UNIT_STATS[unit.kind as UnitKind]?.radius ?? 0.4;
+  }
+
+  function sameMoveLayer(a: UnitHandle, b: UnitHandle): boolean {
+    return (a.kind === "helicopter") === (b.kind === "helicopter");
+  }
+
+  /** Soft repulsion from nearby units (steering blend). */
+  function neighborSeparation(agent: Agent): { x: number; z: number } {
+    const unit = agent.unit;
+    const ra = bodyRadius(unit);
+    const px = unit.root.position.x;
+    const pz = unit.root.position.z;
+    let sx = 0;
+    let sz = 0;
+    for (const other of agents) {
+      if (other === agent || other.unit.destroyed) continue;
+      if (!sameMoveLayer(unit, other.unit)) continue;
+      const rb = bodyRadius(other.unit);
+      const prefer = ra + rb + UNIT_SEP_PADDING;
+      const dx = px - other.unit.root.position.x;
+      const dz = pz - other.unit.root.position.z;
+      const d = Math.hypot(dx, dz);
+      if (d >= prefer) continue;
+      if (d < 1e-4) {
+        sx += Math.random() - 0.5;
+        sz += Math.random() - 0.5;
+        continue;
+      }
+      const w = (prefer - d) / prefer;
+      const force = w * w;
+      sx += (dx / d) * force;
+      sz += (dz / d) * force;
+    }
+    return { x: sx, z: sz };
+  }
+
+  /**
+   * Resolve overlaps after all agents move — keeps idle combat clumps from stacking.
+   */
+  function resolveUnitSeparation(dt: number): void {
+    const n = agents.length;
+    if (n < 2) return;
+    const pushX = new Float64Array(n);
+    const pushZ = new Float64Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const a = agents[i].unit;
+      if (a.destroyed) continue;
+      const ra = bodyRadius(a);
+      const ax = a.root.position.x;
+      const az = a.root.position.z;
+      for (let j = i + 1; j < n; j++) {
+        const b = agents[j].unit;
+        if (b.destroyed) continue;
+        if (!sameMoveLayer(a, b)) continue;
+        const minDist = ra + bodyRadius(b) + UNIT_SEP_PADDING * 0.55;
+        let dx = ax - b.root.position.x;
+        let dz = az - b.root.position.z;
+        let d = Math.hypot(dx, dz);
+        if (d >= minDist) continue;
+        if (d < 1e-4) {
+          const ang = Math.random() * Math.PI * 2;
+          dx = Math.cos(ang);
+          dz = Math.sin(ang);
+          d = 1;
+        }
+        const overlap = minDist - d;
+        const push = overlap * 0.5;
+        const nx = dx / d;
+        const nz = dz / d;
+        pushX[i] += nx * push;
+        pushZ[i] += nz * push;
+        pushX[j] -= nx * push;
+        pushZ[j] -= nz * push;
+      }
+    }
+
+    const rate = Math.min(1, UNIT_SEP_RESOLVE * dt);
+    for (let i = 0; i < n; i++) {
+      const unit = agents[i].unit;
+      if (unit.destroyed) continue;
+      const px = pushX[i];
+      const pz = pushZ[i];
+      if (px * px + pz * pz < 1e-8) continue;
+      const next = clampToPlayfield(
+        unit.root.position.x + px * rate,
+        unit.root.position.z + pz * rate,
+        halfX,
+        halfZ,
+        1.4,
+      );
+      unit.root.position.x = next.x;
+      unit.root.position.z = next.z;
+    }
+  }
+
   function moveToward(
     agent: Agent,
     goal: { x: number; z: number },
@@ -693,7 +875,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         ? 0.7
         : unit.kind === "helicopter"
           ? 0
-          : UNIT_STATS[unit.kind as UnitKind]?.radius ?? 0.4;
+          : bodyRadius(unit);
     const obstacles =
       unit.kind === "helicopter"
         ? []
@@ -712,15 +894,33 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (agent.stuckTimer > 0.55 && !agent.bypass && obstacles.length > 0) {
       const bypass = bypassAroundObstacle(from, goal, obstacles, agentRadius);
       if (bypass) {
-        agent.bypass = clampToPlayfield(bypass.x, bypass.z, half, 1.4);
+        agent.bypass = clampToPlayfield(bypass.x, bypass.z, halfX, halfZ, 1.4);
         agent.stuckTimer = 0;
       }
     }
 
-    const dir = steerToward(from, steerGoal, obstacles, {
+    let dir = steerToward(from, steerGoal, obstacles, {
       arriveDist: agent.bypass ? 0.55 : 0.45,
       agentRadius,
     });
+
+    const sep = neighborSeparation(agent);
+    const sepLen = Math.hypot(sep.x, sep.z);
+    if (sepLen > 1e-4) {
+      if (!dir) {
+        // Arrived at goal but crowded — still sidestep
+        dir = { x: sep.x / sepLen, z: sep.z / sepLen };
+      } else {
+        dir = {
+          x: dir.x + sep.x * UNIT_SEP_STEER,
+          z: dir.z + sep.z * UNIT_SEP_STEER,
+        };
+        const len = Math.hypot(dir.x, dir.z);
+        if (len > 1e-5) {
+          dir = { x: dir.x / len, z: dir.z / len };
+        }
+      }
+    }
 
     if (!dir) {
       if (agent.bypass) {
@@ -754,7 +954,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const next = clampToPlayfield(
         unit.root.position.x + fx * step,
         unit.root.position.z + fz * step,
-        half,
+        halfX,
+        halfZ,
         1.4,
       );
       unit.root.position.x = next.x;
@@ -768,7 +969,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     const next = clampToPlayfield(
       unit.root.position.x + dir.x * step,
       unit.root.position.z + dir.z * step,
-      half,
+      halfX,
+      halfZ,
       1.4,
     );
     unit.root.position.x = next.x;
@@ -864,7 +1066,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (agent.lockedUnit) {
       const locked = agent.lockedUnit;
       agent.focus = locked;
-      agent.arrived = true;
       const d = distXZ(unit.root.position, locked.root.position);
 
       if (d <= engageRange(unit, locked)) {
@@ -885,13 +1086,43 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       return;
     }
 
+    // At the enemy base: siege the closest living building until none remain
+    if (agent.arrived) {
+      const siege = findClosestEnemyBuilding(unit);
+      if (siege) {
+        agent.focus = siege;
+        const d = distXZ(unit.root.position, siege.root.position);
+        if (d <= engageRange(unit, siege)) {
+          unit.setCombat(true);
+          unit.setAimTarget(siege);
+          unit.setMoving(false);
+          agent.bypass = null;
+          faceTarget(unit, siege, dt);
+        } else {
+          unit.setCombat(false);
+          unit.setAimTarget(null);
+          moveToward(
+            agent,
+            { x: siege.root.position.x, z: siege.root.position.z },
+            dt,
+          );
+        }
+        return;
+      }
+      agent.focus = null;
+      unit.setCombat(false);
+      unit.setAimTarget(null);
+      unit.setMoving(false);
+      return;
+    }
+
+    // En route: shoot buildings/turrets already in range, else keep marching
     const building = findBuildingInRange(unit);
     if (building) {
       agent.focus = building;
       unit.setCombat(true);
       unit.setAimTarget(building);
       unit.setMoving(false);
-      agent.arrived = true;
       agent.bypass = null;
       faceTarget(unit, building, dt);
       return;
@@ -900,17 +1131,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     agent.focus = null;
     unit.setCombat(false);
     unit.setAimTarget(null);
-
-    if (agent.arrived) {
-      const toward = unit.team === "blue" ? 1 : -1;
-      agent.moveTarget = {
-        x: unit.root.position.x + (Math.random() - 0.5) * 0.8,
-        z: toward * (buildingZ - 2.2),
-      };
-      agent.bypass = null;
-      agent.arrived = false;
-      agent.stuckTimer = 0;
-    }
 
     if (!agent.moveTarget) {
       unit.setMoving(false);
@@ -927,6 +1147,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       ) < 0.5
     ) {
       agent.arrived = true;
+      agent.moveTarget = null;
       unit.setMoving(false);
     }
   }
@@ -1163,12 +1384,45 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       addCoins(PLAYER_TEAM, COINS_PER_SEC * dt);
       addCoins(AI_TEAM, COINS_PER_SEC * dt);
 
+      // Hill flag capture: sole-team presence → team color + 2 coins/sec
+      let playerInRange = false;
+      let aiInRange = false;
+      for (const agent of agents) {
+        if (agent.unit.destroyed) continue;
+        const dx = agent.unit.root.position.x;
+        const dz = agent.unit.root.position.z;
+        if (dx * dx + dz * dz > FLAG_CAPTURE_RADIUS * FLAG_CAPTURE_RADIUS) continue;
+        if (agent.unit.team === PLAYER_TEAM) playerInRange = true;
+        else aiInRange = true;
+        if (playerInRange && aiInRange) break;
+      }
+      let flagOwner: Team | null = null;
+      if (playerInRange && !aiInRange) flagOwner = PLAYER_TEAM;
+      else if (aiInRange && !playerInRange) flagOwner = AI_TEAM;
+      captureFlag.setOwner(flagOwner);
+      if (flagOwner) {
+        flagCoinCooldown -= dt;
+        if (flagCoinCooldown <= 0) {
+          flagCoinCooldown = 1;
+          const flagPos = captureFlag.root.getAbsolutePosition();
+          addCoins(flagOwner, FLAG_COINS_PER_SEC, {
+            world: flagPos.clone(),
+            popup: true,
+            follow: () => captureFlag.root.getAbsolutePosition(),
+          });
+        }
+      } else {
+        flagCoinCooldown = 0;
+      }
+
       aiCooldown -= dt;
       if (aiCooldown <= 0) {
         aiCooldown = AI_DECISION_INTERVAL_SEC;
         runAiDecision();
       }
     }
+
+    captureFlag.update(dt, elapsed);
 
     for (const slot of slots) {
       slot.platform.update(dt, elapsed);
@@ -1179,7 +1433,19 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         clearExpiredBuilding(slot);
         continue;
       }
-      if (b.destroyed) continue;
+      if (b.destroyed) {
+        slot.hpBar?.setVisible(false);
+        continue;
+      }
+      if (slot.hpBar) {
+        slot.hpBar.setVisible(true);
+        slot.hpBar.setRatio(b.hp / b.maxHp);
+        slot.hpBar.update(
+          b.root.getAbsolutePosition(),
+          BUILDING_HP_BAR_HEIGHT,
+          camera.globalPosition,
+        );
+      }
       slot.spawnCooldown -= dt;
       if (slot.spawnCooldown <= 0) {
         spawnFrom(slot);
@@ -1196,6 +1462,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       if (agent.unit.destroyed) noteUnitDeath(agent.unit);
       updateAgent(agent, dt);
     }
+    resolveUnitSeparation(dt);
 
     for (const agent of agents) agent.unit.update(dt, elapsed);
 
@@ -1242,11 +1509,13 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       canvas.removeEventListener("pointerup", onPointerUp);
       hud.dispose();
       coinFx.dispose();
+      captureFlag.dispose();
       for (const agent of agents) {
         agent.hpBar.dispose();
         agent.unit.dispose();
       }
       for (const slot of slots) {
+        slot.hpBar?.dispose();
         slot.building?.dispose();
         slot.pickProxy.dispose();
         slot.platform.dispose();

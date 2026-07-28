@@ -62,6 +62,16 @@ export const HELI_GUN_RANGE = UNIT_STATS.rifleman.shootRange * 0.8;
 export const TANK_SPLASH_RADIUS = 2.2;
 export const MISSILE_SPLASH_RADIUS = 2.8;
 
+/**
+ * Hitscan / shell hit chance vs range.
+ * 100% at point-blank, 50% at the weapon's max engage range (linear in between).
+ * Missiles ignore this and always hit.
+ */
+export const ACCURACY_AT_POINT_BLANK = 1;
+export const ACCURACY_AT_MAX_RANGE = 0.5;
+/** How far a miss lands from the aim point (world units). */
+export const MISS_SCATTER_RADIUS = 1.85;
+
 /** Fixed map turrets: tank range, rifle cadence, 1.25× rifle damage, 2× tank HP. */
 export const TURRET_SHOOT_RANGE = UNIT_STATS.tank.shootRange;
 export const TURRET_FIRE_HZ = UNIT_STATS.rifleman.fireRateHz;
@@ -72,12 +82,31 @@ export const TURRET_HP_BAR_HEIGHT = 1.85;
 
 export const BUILDING_MAX_HP = 320;
 export const BUILDING_RADIUS = 1.15;
+/** World-space HP bar height above the building root. */
+export const BUILDING_HP_BAR_HEIGHT = 2.15;
 export const SPAWN_INTERVAL_SEC = 15;
 /** Barracks produce infantry twice as fast as other buildings. */
 export const BARRACKS_SPAWN_INTERVAL_SEC = SPAWN_INTERVAL_SEC / 2;
 export const CORPSE_LIFETIME_SEC = 15;
-export const PLAY_SIZE = 28;
-export const SLOT_COUNT = 8;
+/** East–west playfield width (building rows span this). */
+export const PLAY_WIDTH = 36;
+/** North–south playfield depth — 2× original width stretch on the long axis. */
+export const PLAY_DEPTH = 56;
+/** @deprecated Prefer PLAY_WIDTH — kept as width alias. */
+export const PLAY_SIZE = PLAY_WIDTH;
+export const SLOT_COUNT = 10;
+/** Turrets per team, spaced across the building line. */
+export const TURRETS_PER_TEAM = 3;
+/** How far in front of the building row turrets sit (toward midfield). */
+export const TURRET_FORWARD_FROM_BASE = 6.8;
+
+/** Central hill footprint (height stays fixed in the heightmap). */
+export const HILL_RADIUS = 13;
+export const HILL_HEIGHT = 3.4;
+/** Capture zone is half the hill radius. */
+export const FLAG_CAPTURE_RADIUS = HILL_RADIUS * 0.5;
+/** Coins/sec awarded to the team that solely holds the flag zone. */
+export const FLAG_COINS_PER_SEC = 2;
 
 /** Passive income for each team. */
 export const COINS_PER_SEC = 2;

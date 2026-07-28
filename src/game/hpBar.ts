@@ -8,6 +8,9 @@ import {
   Vector3,
 } from "@babylonjs/core";
 
+const HP_FILL = "#3dff4a";
+const FILL_HALF_W = 0.34;
+
 export interface HpBarHandle {
   root: TransformNode;
   setRatio: (ratio: number) => void;
@@ -18,8 +21,10 @@ export interface HpBarHandle {
 
 /**
  * World-space HP bar that billboards toward the player camera.
+ * Fill is bright green for every team and depletes from the right
+ * (remaining health stays on the left).
  */
-export function createHpBar(scene: Scene, name: string, teamColor: string): HpBarHandle {
+export function createHpBar(scene: Scene, name: string): HpBarHandle {
   const root = new TransformNode(`${name}_hp`, scene);
 
   const backMat = new StandardMaterial(`${name}_hpBack`, scene);
@@ -28,9 +33,10 @@ export function createHpBar(scene: Scene, name: string, teamColor: string): HpBa
   backMat.specularColor = Color3.Black();
   backMat.disableLighting = true;
 
+  const tint = Color3.FromHexString(HP_FILL);
   const fillMat = new StandardMaterial(`${name}_hpFill`, scene);
-  fillMat.diffuseColor = Color3.FromHexString(teamColor);
-  fillMat.emissiveColor = Color3.FromHexString(teamColor).scale(0.55);
+  fillMat.diffuseColor = tint;
+  fillMat.emissiveColor = tint.scale(0.75);
   fillMat.specularColor = Color3.Black();
   fillMat.disableLighting = true;
 
@@ -45,7 +51,7 @@ export function createHpBar(scene: Scene, name: string, teamColor: string): HpBa
 
   const fill = MeshBuilder.CreateBox(
     `${name}_hpFillMesh`,
-    { width: 0.68, height: 0.055, depth: 0.05 },
+    { width: FILL_HALF_W * 2, height: 0.055, depth: 0.05 },
     scene,
   ) as Mesh;
   fill.material = fillMat;
@@ -60,7 +66,9 @@ export function createHpBar(scene: Scene, name: string, teamColor: string): HpBa
     setRatio: (r) => {
       ratio = Math.max(0, Math.min(1, r));
       fill.scaling.x = Math.max(0.001, ratio);
-      fill.position.x = -0.34 * (1 - ratio);
+      // Keep the left edge fixed so the bar empties toward the left
+      // (from the camera, local +X reads as screen-left after billboarding).
+      fill.position.x = FILL_HALF_W * (1 - ratio);
       fill.setEnabled(ratio > 0.001);
     },
     setVisible: (visible) => {

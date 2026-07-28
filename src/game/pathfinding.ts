@@ -197,16 +197,18 @@ export function bypassAroundObstacle(
   };
 }
 
-/** Clamp a point inside the square playfield (margin from edges). */
+/** Clamp a point inside the rectangular playfield (margin from edges). */
 export function clampToPlayfield(
   x: number,
   z: number,
-  halfSize: number,
+  halfX: number,
+  halfZ: number = halfX,
   margin = 1.2,
 ): Vec2 {
-  const lim = halfSize - margin;
+  const limX = halfX - margin;
+  const limZ = halfZ - margin;
   return {
-    x: Math.max(-lim, Math.min(lim, x)),
-    z: Math.max(-lim, Math.min(lim, z)),
+    x: Math.max(-limX, Math.min(limX, x)),
+    z: Math.max(-limZ, Math.min(limZ, z)),
   };
 }

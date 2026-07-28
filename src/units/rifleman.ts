@@ -30,6 +30,7 @@ export function createRifleman(
   const combatState = createUnitCombatState("rifleman");
   const knockback = createKnockback();
   const hitPoint = new Vector3();
+  const muzzleWorld = new Vector3();
 
   const bodyMat = colorMat(scene, `${name}_body`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -91,6 +92,11 @@ export function createRifleman(
   rifle.parent = body;
   box(scene, `${name}_rifleStock`, { w: 0.08, h: 0.1, d: 0.22 }, new Vector3(0, 0, -0.12), darkMat, rifle);
   box(scene, `${name}_rifleBarrel`, { w: 0.06, h: 0.06, d: 0.45 }, new Vector3(0, 0.02, 0.18), metalMat, rifle);
+
+  const muzzleTip = new TransformNode(`${name}_muzzleTip`, scene);
+  muzzleTip.parent = rifle;
+  // Barrel front face: center 0.18 + half depth 0.225
+  muzzleTip.position.set(0, 0.02, 0.405);
 
   const muzzleFlash = box(
     scene,
@@ -186,6 +192,12 @@ export function createRifleman(
       const p = out ?? hitPoint;
       p.copyFrom(root.getAbsolutePosition());
       p.y += 0.75;
+      return p;
+    },
+    getMuzzlePoint: (out?: Vector3) => {
+      const p = out ?? muzzleWorld;
+      muzzleTip.computeWorldMatrix(true);
+      p.copyFrom(muzzleTip.getAbsolutePosition());
       return p;
     },
     applyImpact: (fromX, fromZ, strength) => {

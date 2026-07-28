@@ -33,6 +33,7 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   const combatState = createUnitCombatState("tank");
   const knockback = createKnockback();
   const hitPoint = new Vector3();
+  const muzzleWorld = new Vector3();
 
   const hullMat = colorMat(scene, `${name}_hull`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -140,6 +141,10 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   box(scene, `${name}_barrelTube`, { w: 0.09, h: 0.09, d: 0.95 }, new Vector3(0, 0, 0.55), metalMat, barrel);
   box(scene, `${name}_muzzle`, { w: 0.13, h: 0.13, d: 0.12 }, new Vector3(0, 0, 1.05), darkMat, barrel);
 
+  const muzzleTip = new TransformNode(`${name}_muzzleTip`, scene);
+  muzzleTip.parent = barrel;
+  muzzleTip.position.set(0, 0, 1.11);
+
   const muzzleFlash = box(
     scene,
     `${name}_muzzleFlash`,
@@ -237,6 +242,12 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
       const p = out ?? hitPoint;
       p.copyFrom(root.getAbsolutePosition());
       p.y += 0.45;
+      return p;
+    },
+    getMuzzlePoint: (out?: Vector3) => {
+      const p = out ?? muzzleWorld;
+      muzzleTip.computeWorldMatrix(true);
+      p.copyFrom(muzzleTip.getAbsolutePosition());
       return p;
     },
     applyImpact: (fromX, fromZ, strength) => {

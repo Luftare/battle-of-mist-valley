@@ -38,6 +38,8 @@ export interface UnitHandle extends CombatEntity {
   /** True once the corpse has sunk and can be disposed. */
   readonly expired: boolean;
   takeDamage: (amount: number) => void;
+  /** World-space tip of the firing barrel (hitscan muzzle). */
+  getMuzzlePoint: (out?: Vector3) => Vector3;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 }

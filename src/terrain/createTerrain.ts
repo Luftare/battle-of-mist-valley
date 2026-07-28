@@ -6,7 +6,7 @@ import {
   TransformNode,
   Vector3,
 } from "@babylonjs/core";
-import { PLAY_SIZE } from "../game/stats";
+import { HILL_HEIGHT, HILL_RADIUS, PLAY_DEPTH, PLAY_WIDTH } from "../game/stats";
 import {
   getBuildingSlotPositions,
   inBuildingBand,
@@ -37,6 +37,9 @@ export interface TerrainTree {
 
 export interface TerrainHandle {
   root: TransformNode;
+  width: number;
+  depth: number;
+  /** @deprecated Prefer width — east-west extent. */
   size: number;
   /**
    * Live obstacle list for pathfinding (standing trees + rocks).
@@ -189,14 +192,15 @@ function createGrassTuft(
  */
 function sampleHeightMap(x: number, z: number): number {
   const dist = Math.hypot(x, z);
-  const radius = 9;
+  const radius = HILL_RADIUS;
   const t = Math.max(0, 1 - dist / radius);
   const falloff = t * t * (3 - 2 * t);
-  return falloff * 3.4;
+  return falloff * HILL_HEIGHT;
 }
 
 /** Large triangles so the central hill reads as clear low-poly facets. */
-const GROUND_SUBDIVISIONS = 8;
+const GROUND_SUBDIV_X = 10;
+const GROUND_SUBDIV_Z = 16;
 
 /** Height on a triangle given local UV (u,v) in [0,1]² of a ground cell. */
 function heightOnCellTriangle(
@@ -222,7 +226,8 @@ function heightOnCellTriangle(
  */
 function buildGroundSamplers(
   positions: number[],
-  size: number,
+  width: number,
+  depth: number,
 ): {
   getGroundYAt: (x: number, z: number) => number;
   getGroundTiltAt: (
@@ -231,16 +236,19 @@ function buildGroundSamplers(
     yaw: number,
   ) => { pitch: number; roll: number };
 } {
-  const half = size * 0.5;
-  const n = GROUND_SUBDIVISIONS + 1;
-  const cell = size / GROUND_SUBDIVISIONS;
-  const heights = new Float32Array(n * n);
+  const halfX = width * 0.5;
+  const halfZ = depth * 0.5;
+  const cols = GROUND_SUBDIV_X + 1;
+  const rows = GROUND_SUBDIV_Z + 1;
+  const cellX = width / GROUND_SUBDIV_X;
+  const cellZ = depth / GROUND_SUBDIV_Z;
+  const heights = new Float32Array(rows * cols);
   // CreateGround packs vertices row-major with row 0 at +Z.
   for (let i = 0, vi = 0; i < positions.length; i += 3, vi++) {
     heights[vi] = positions[i + 1];
   }
 
-  const h = (row: number, col: number) => heights[row * n + col] ?? 0;
+  const h = (row: number, col: number) => heights[row * cols + col] ?? 0;
 
   function sampleCell(x: number, z: number): {
     row0: number;
@@ -252,10 +260,10 @@ function buildGroundSamplers(
     y01: number;
     y11: number;
   } {
-    const colF = ((x + half) / size) * GROUND_SUBDIVISIONS;
-    const rowF = ((half - z) / size) * GROUND_SUBDIVISIONS;
-    const col0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(colF)));
-    const row0 = Math.max(0, Math.min(GROUND_SUBDIVISIONS - 1, Math.floor(rowF)));
+    const colF = ((x + halfX) / width) * GROUND_SUBDIV_X;
+    const rowF = ((halfZ - z) / depth) * GROUND_SUBDIV_Z;
+    const col0 = Math.max(0, Math.min(GROUND_SUBDIV_X - 1, Math.floor(colF)));
+    const row0 = Math.max(0, Math.min(GROUND_SUBDIV_Z - 1, Math.floor(rowF)));
     return {
       row0,
       col0,
@@ -276,7 +284,7 @@ function buildGroundSamplers(
     u: number,
     v: number,
   ): { x: number; y: number; z: number } {
-    // World deltas for one cell: +X = cell, +Z = -cell (row increases → −Z)
+    // World deltas for one cell: +X = cellX, +Z = -cellZ (row increases → −Z)
     let ax: number;
     let ay: number;
     let az: number;
@@ -285,20 +293,20 @@ function buildGroundSamplers(
     let bz: number;
     if (u >= v) {
       // Triangle (0,0)→(1,0)→(1,1)
-      ax = cell;
+      ax = cellX;
       ay = y10 - y00;
       az = 0;
-      bx = cell;
+      bx = cellX;
       by = y11 - y00;
-      bz = -cell;
+      bz = -cellZ;
     } else {
       // Triangle (0,0)→(1,1)→(0,1)
-      ax = cell;
+      ax = cellX;
       ay = y11 - y00;
-      az = -cell;
+      az = -cellZ;
       bx = 0;
       by = y01 - y00;
-      bz = -cell;
+      bz = -cellZ;
     }
     let nx = ay * bz - az * by;
     let ny = az * bx - ax * bz;
@@ -361,10 +369,9 @@ function buildGroundYAtFootprint(
  */
 function flattenSlotPads(
   positions: number[],
-  half: number,
   heightFn: (x: number, z: number) => number,
 ): void {
-  const slots = getBuildingSlotPositions(half);
+  const slots = getBuildingSlotPositions();
   const padYs = slots.map((s) => heightFn(s.x, s.z));
   for (let i = 0; i < positions.length; i += 3) {
     const vx = positions[i];
@@ -387,10 +394,14 @@ const SINK_DURATION = 10;
 const FALL_ANGLE = Math.PI / 2 - 0.08;
 
 /**
- * Square meadow battlefield. Grass tufts are decorative only.
+ * Rectangular meadow battlefield (wider N–S). Grass tufts are decorative only.
  * Trees block infantry; tanks ram them over. Rocks block everyone on foot.
  */
-export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
+export function createTerrain(
+  scene: Scene,
+  width = PLAY_WIDTH,
+  depth = PLAY_DEPTH,
+): TerrainHandle {
   const root = new TransformNode("terrain", scene);
   const animated: AnimatedProp[] = [];
   const shadows: BlobShadowHandle[] = [];
@@ -399,7 +410,8 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
   const treeRuntimes: TreeRuntime[] = [];
   const treeHandles: TerrainTree[] = [];
   const rand = seededRandom(42);
-  const half = size * 0.5;
+  const halfX = width * 0.5;
+  const halfZ = depth * 0.5;
 
   const groundMat = new StandardMaterial("groundMat", scene);
   groundMat.diffuseColor = Color3.FromHexString(WORLD_COLORS.grass);
@@ -407,7 +419,12 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
 
   const ground = MeshBuilder.CreateGround(
     "ground",
-    { width: size, height: size, subdivisions: GROUND_SUBDIVISIONS },
+    {
+      width,
+      height: depth,
+      subdivisionsX: GROUND_SUBDIV_X,
+      subdivisionsY: GROUND_SUBDIV_Z,
+    },
     scene,
   );
   ground.material = groundMat;
@@ -428,9 +445,9 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     for (let i = 0; i < pos.length; i += 3) {
       pos[i + 1] = sampleHeightMap(pos[i], pos[i + 2]);
     }
-    flattenSlotPads(pos, half, sampleHeightMap);
+    flattenSlotPads(pos, sampleHeightMap);
     ground.updateVerticesData("position", pos);
-    const samplers = buildGroundSamplers(pos, size);
+    const samplers = buildGroundSamplers(pos, width, depth);
     getGroundYAt = samplers.getGroundYAt;
     getGroundTiltAt = samplers.getGroundTiltAt;
     getGroundYAtFootprint = buildGroundYAtFootprint(getGroundYAt);
@@ -464,16 +481,33 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     removeObstacle(runtime.obstacle);
   }
 
-  const treeCount = 14;
+  const propPoints: { x: number; z: number }[] = [];
+  const MIN_PROP_SEP = 5.5;
+
+  function tooCloseToProps(x: number, z: number): boolean {
+    for (const p of propPoints) {
+      if (Math.hypot(p.x - x, p.z - z) < MIN_PROP_SEP) return true;
+    }
+    return false;
+  }
+
+  const treeCount = 22;
   for (let i = 0; i < treeCount; i++) {
     let x = 0;
     let z = 0;
     let attempts = 0;
     do {
-      x = (rand() - 0.5) * size * 0.72;
-      z = (rand() - 0.5) * size * 0.85;
+      x = (rand() - 0.5) * width * 0.72;
+      z = (rand() - 0.5) * depth * 0.85;
       attempts++;
-    } while ((Math.abs(x) < 2.2 || inBuildingBand(x, z, half)) && attempts < 40);
+    } while (
+      (Math.abs(x) < 2.2 ||
+        inBuildingBand(x, z, halfX, halfZ) ||
+        tooCloseToProps(x, z)) &&
+      attempts < 80
+    );
+    if (attempts >= 80) continue;
+    propPoints.push({ x, z });
 
     const scale = 0.65 + rand() * 0.55;
     const tree = createTree(scene, `tree_${i}`, root, scale);
@@ -525,15 +559,23 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
     animated.push({ node: tree, phase: runtime.phase, kind: "tree" });
   }
 
-  for (let i = 0; i < 12; i++) {
+  const rockCount = 9;
+  for (let i = 0; i < rockCount; i++) {
     let x = 0;
     let z = 0;
     let attempts = 0;
     do {
-      x = (rand() - 0.5) * size * 0.7;
-      z = (rand() - 0.5) * size * 0.85;
+      x = (rand() - 0.5) * width * 0.7;
+      z = (rand() - 0.5) * depth * 0.85;
       attempts++;
-    } while ((Math.abs(x) < 1.8 || inBuildingBand(x, z, half)) && attempts < 40);
+    } while (
+      (Math.abs(x) < 1.8 ||
+        inBuildingBand(x, z, halfX, halfZ) ||
+        tooCloseToProps(x, z)) &&
+      attempts < 80
+    );
+    if (attempts >= 80) continue;
+    propPoints.push({ x, z });
 
     const scale = 0.35 + rand() * 0.7;
     const rock = createRock(scene, `rock_${i}`, root, scale);
@@ -559,15 +601,15 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
   }
 
   // Decorative only — never added to obstacles
-  for (let i = 0; i < 50; i++) {
+  for (let i = 0; i < 70; i++) {
     let x = 0;
     let z = 0;
     let attempts = 0;
     do {
-      x = (rand() - 0.5) * size * 0.9;
-      z = (rand() - 0.5) * size * 0.9;
+      x = (rand() - 0.5) * width * 0.9;
+      z = (rand() - 0.5) * depth * 0.9;
       attempts++;
-    } while (inBuildingBand(x, z, half) && attempts < 40);
+    } while (inBuildingBand(x, z, halfX, halfZ) && attempts < 40);
 
     const scale = 0.55 + rand() * 0.85;
     const tuft = createGrassTuft(scene, `grass_${i}`, root, scale);
@@ -580,7 +622,9 @@ export function createTerrain(scene: Scene, size = PLAY_SIZE): TerrainHandle {
 
   return {
     root,
-    size,
+    width,
+    depth,
+    size: width,
     obstacles,
     rockObstacles,
     trees: treeHandles,

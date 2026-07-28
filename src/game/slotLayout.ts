@@ -1,4 +1,4 @@
-import { PLAY_SIZE, SLOT_COUNT } from "./stats";
+import { PLAY_DEPTH, PLAY_WIDTH, SLOT_COUNT } from "./stats";
 import type { Team } from "../theme/colors";
 
 /** World half-width / half-depth of each brown slot pad. */
@@ -14,15 +14,18 @@ export interface SlotPosition {
   index: number;
 }
 
-export function buildingLineZ(half = PLAY_SIZE * 0.5): number {
-  return half - 2.4;
+export function buildingLineZ(halfZ = PLAY_DEPTH * 0.5): number {
+  return halfZ - 2.4;
 }
 
 /** All 16 build-slot centers (8 per team, north & south rows). */
-export function getBuildingSlotPositions(half = PLAY_SIZE * 0.5): SlotPosition[] {
-  const zLine = buildingLineZ(half);
-  const xMin = -half + 2.2;
-  const xMax = half - 2.2;
+export function getBuildingSlotPositions(
+  halfX = PLAY_WIDTH * 0.5,
+  halfZ = PLAY_DEPTH * 0.5,
+): SlotPosition[] {
+  const zLine = buildingLineZ(halfZ);
+  const xMin = -halfX + 2.2;
+  const xMax = halfX - 2.2;
   const slots: SlotPosition[] = [];
   for (let i = 0; i < SLOT_COUNT; i++) {
     const t = i / Math.max(1, SLOT_COUNT - 1);
@@ -34,14 +37,19 @@ export function getBuildingSlotPositions(half = PLAY_SIZE * 0.5): SlotPosition[]
 }
 
 /** Keep trees / rocks / grass off the building rows. */
-export function inBuildingBand(x: number, z: number, half = PLAY_SIZE * 0.5): boolean {
-  const zLine = buildingLineZ(half);
-  const xMin = -half + 2.2;
-  const xMax = half - 2.2;
-  const zBand = 1.65;
+export function inBuildingBand(
+  x: number,
+  z: number,
+  halfX = PLAY_WIDTH * 0.5,
+  halfZ = PLAY_DEPTH * 0.5,
+): boolean {
+  const zLine = buildingLineZ(halfZ);
+  const xMin = -halfX + 2.2;
+  const xMax = halfX - 2.2;
+  const zBand = 7.2;
   return (
     Math.abs(z) > zLine - zBand &&
-    Math.abs(z) < half - 0.6 &&
+    Math.abs(z) < halfZ - 0.6 &&
     x >= xMin - 1.5 &&
     x <= xMax + 1.5
   );
@@ -51,9 +59,10 @@ export function inBuildingBand(x: number, z: number, half = PLAY_SIZE * 0.5): bo
 export function inSlotFootprint(
   x: number,
   z: number,
-  half = PLAY_SIZE * 0.5,
+  halfX = PLAY_WIDTH * 0.5,
+  halfZ = PLAY_DEPTH * 0.5,
 ): boolean {
-  for (const slot of getBuildingSlotPositions(half)) {
+  for (const slot of getBuildingSlotPositions(halfX, halfZ)) {
     if (
       Math.abs(x - slot.x) <= PLATFORM_PAD_HALF_W &&
       Math.abs(z - slot.z) <= PLATFORM_PAD_HALF_D

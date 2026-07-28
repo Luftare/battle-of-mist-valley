@@ -23,6 +23,8 @@ export interface HudHandle {
   /** Drive the displayed coin tween each frame. */
   update: (dt: number) => void;
   openBuildModal: (opts: BuildModalOpts) => void;
+  /** Refresh build-card affordability while the modal stays open. */
+  refreshBuildAfford: (coins: number) => void;
   closeModal: () => void;
   showEndScreen: (result: "victory" | "defeat") => void;
   dispose: () => void;
@@ -71,17 +73,28 @@ export function createHud(): HudHandle {
   let displayCoins = 0;
   let pulseTimer = 0;
   let pulseDir: "up" | "down" | null = null;
+  let modalCoins = 0;
+  let buildCards: HTMLButtonElement[] = [];
 
   function closeModal(): void {
     modalHost.hidden = true;
     modalHost.innerHTML = "";
     modalHost.onclick = null;
+    buildCards = [];
   }
 
   function paintCoins(): void {
     const el = coinEl();
     if (!el) return;
     el.textContent = String(Math.round(displayCoins));
+  }
+
+  function applyBuildAfford(coins: number): void {
+    modalCoins = coins;
+    for (const card of buildCards) {
+      const cost = Number(card.dataset.cost ?? 0);
+      card.disabled = coins < cost;
+    }
   }
 
   return {
@@ -101,6 +114,7 @@ export function createHud(): HudHandle {
         }
       }
       targetCoins = next;
+      if (!modalHost.hidden) applyBuildAfford(next);
     },
     update: (dt) => {
       const diff = targetCoins - displayCoins;
@@ -124,6 +138,7 @@ export function createHud(): HudHandle {
     openBuildModal: (opts) => {
       closeModal();
       modalHost.hidden = false;
+      modalCoins = opts.coins;
 
       const panel = document.createElement("div");
       panel.className = "modal-panel";
@@ -156,14 +171,15 @@ export function createHud(): HudHandle {
       } else {
         const list = document.createElement("div");
         list.className = "build-list";
+        buildCards = [];
 
         for (const kind of BUILDING_KINDS) {
           const cost = BUILDING_COST[kind];
-          const affordable = opts.coins >= cost;
           const card = document.createElement("button");
           card.type = "button";
           card.className = `build-card build-card--${kind}`;
-          card.disabled = !affordable;
+          card.dataset.cost = String(cost);
+          card.disabled = modalCoins < cost;
           card.innerHTML = `
             <div class="build-card-head">
               <span class="build-name">${BUILDING_LABEL[kind]}</span>
@@ -173,11 +189,12 @@ export function createHud(): HudHandle {
             <div class="build-blurb">${BUILDING_BLURB[kind]}</div>
           `;
           card.addEventListener("click", () => {
-            if (opts.coins < cost) return;
+            if (modalCoins < cost) return;
             closeModal();
             opts.onBuild(kind);
           });
           list.appendChild(card);
+          buildCards.push(card);
         }
         panel.appendChild(list);
       }
@@ -199,6 +216,10 @@ export function createHud(): HudHandle {
           opts.onClose();
         }
       };
+    },
+    refreshBuildAfford: (coins) => {
+      if (modalHost.hidden) return;
+      applyBuildAfford(coins);
     },
     closeModal,
     showEndScreen: (result) => {

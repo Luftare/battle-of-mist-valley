@@ -45,6 +45,7 @@ export function createHelicopter(
   const combatState = createUnitCombatState("helicopter");
   const knockback = createKnockback();
   const hitPoint = new Vector3();
+  const muzzleWorld = new Vector3();
 
   const bodyMat = colorMat(scene, `${name}_body`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -77,6 +78,12 @@ export function createHelicopter(
   chinGun.position = new Vector3(0, -0.28, 0.35);
   box(scene, `${name}_gunMount`, { w: 0.12, h: 0.1, d: 0.14 }, new Vector3(0, 0.04, 0), darkMat, chinGun);
   box(scene, `${name}_gunBarrel`, { w: 0.05, h: 0.05, d: 0.32 }, new Vector3(0, 0, 0.2), metalMat, chinGun);
+
+  const muzzleTip = new TransformNode(`${name}_muzzleTip`, scene);
+  muzzleTip.parent = chinGun;
+  // Barrel front face: center 0.2 + half depth 0.16
+  muzzleTip.position.set(0, 0, 0.36);
+
   const gunFlash = box(
     scene,
     `${name}_gunFlash`,
@@ -279,6 +286,12 @@ export function createHelicopter(
       const p = out ?? hitPoint;
       body.computeWorldMatrix(true);
       p.copyFrom(body.getAbsolutePosition());
+      return p;
+    },
+    getMuzzlePoint: (out?: Vector3) => {
+      const p = out ?? muzzleWorld;
+      muzzleTip.computeWorldMatrix(true);
+      p.copyFrom(muzzleTip.getAbsolutePosition());
       return p;
     },
     applyImpact: (fromX, fromZ, strength) => {

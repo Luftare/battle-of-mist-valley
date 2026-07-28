@@ -30,6 +30,7 @@ export function createSupplyTruck(
   const combatState = createUnitCombatState("supplyTruck");
   const knockback = createKnockback();
   const hitPoint = new Vector3();
+  const muzzleWorld = new Vector3();
 
   const bodyMat = colorMat(scene, `${name}_body`, palette.primary);
   const trimMat = colorMat(scene, `${name}_trim`, palette.secondary);
@@ -213,6 +214,7 @@ export function createSupplyTruck(
       p.copyFrom(body.getAbsolutePosition());
       return p;
     },
+    getMuzzlePoint: (out?: Vector3) => handle.getHitPoint(out ?? muzzleWorld),
     applyImpact: (fromX, fromZ, strength) => {
       if (combatState.destroyed) return;
       knockback.applyImpact(fromX, fromZ, strength, root);

@@ -1,4 +1,5 @@
 import { Vector3, type TransformNode } from "@babylonjs/core";
+import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 import {
   BUILDING_MAX_HP,
   COLLAPSE_DURATION_SEC,
@@ -32,6 +33,16 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
   const baseScale = opts.root.scaling.x;
   const hitPoint = new Vector3();
   let shake = 0;
+  let smoke: WreckSmokeHandle | null = null;
+
+  function startWreckSmoke(): void {
+    if (smoke) return;
+    smoke = createWreckSmoke(opts.root.getScene(), opts.root, {
+      rate: 42,
+      scale: 1.45,
+    });
+    smoke.start();
+  }
 
   return {
     root: opts.root,
@@ -69,6 +80,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       if (hp <= 0) {
         destroyed = true;
         sinkAge = 0;
+        startWreckSmoke();
       }
     },
     beginCollapse: () => {
@@ -78,6 +90,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       // Stop counting as a living structure for combat / win checks
       destroyed = true;
       hp = 0;
+      startWreckSmoke();
     },
     update: (dt, time) => {
       if (collapsing) {
@@ -89,6 +102,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
         opts.root.scaling.setAll(s);
         opts.root.rotation.z = Math.sin(time * 18) * 0.08 * (1 - t);
         opts.root.rotation.x = Math.cos(time * 14) * 0.05 * (1 - t);
+        smoke?.update();
         if (collapseAge >= COLLAPSE_DURATION_SEC) expired = true;
         return;
       }
@@ -97,6 +111,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
         sinkAge += dt;
         const t = Math.min(1, sinkAge / CORPSE_LIFETIME_SEC);
         opts.root.position.y = baseY - t * 2.4;
+        smoke?.update();
         if (sinkAge >= CORPSE_LIFETIME_SEC) expired = true;
         return;
       }
@@ -112,6 +127,8 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       opts.updateAlive(dt, time);
     },
     dispose: () => {
+      smoke?.dispose();
+      smoke = null;
       opts.disposeVisuals();
     },
   };
