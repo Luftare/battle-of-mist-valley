@@ -5,6 +5,7 @@ import {
   StandardMaterial,
   TransformNode,
   Vector3,
+  VertexBuffer,
 } from "@babylonjs/core";
 import { HILL_HEIGHT, HILL_RADIUS, PLAY_DEPTH, PLAY_WIDTH } from "../game/stats";
 import {
@@ -188,20 +189,108 @@ function createGrassTuft(
 }
 
 /**
- * Flat meadow with a single soft hill in the center.
- * Sampled only at coarse vertices — facets come from low subdivision.
+ * Soft circular falloff — same shape as the central hill.
  */
-function sampleHeightMap(x: number, z: number): number {
-  const dist = Math.hypot(x, z);
-  const radius = HILL_RADIUS;
+function softHill(x: number, z: number, cx: number, cz: number, radius: number, height: number): number {
+  const dist = Math.hypot(x - cx, z - cz);
   const t = Math.max(0, 1 - dist / radius);
   const falloff = t * t * (3 - 2 * t);
-  return falloff * HILL_HEIGHT;
+  return falloff * height;
 }
 
-/** Large triangles so the central hill reads as clear low-poly facets. */
-const GROUND_SUBDIV_X = 10;
-const GROUND_SUBDIV_Z = 16;
+/** Rim peaks sit outside the playfield; height is 3× the center hill. */
+const MOUNTAIN_HEIGHT = HILL_HEIGHT * 3;
+const MOUNTAIN_RADIUS = HILL_RADIUS * 0.95;
+/**
+ * Peak centers sit ~one mountain radius past the play edge so falloff
+ * is ~0 on the field and rises gently outside. Border covers the far slope.
+ */
+const MOUNTAIN_BORDER = MOUNTAIN_RADIUS * 2 + 4;
+
+type MountainPeak = { x: number; z: number; hMul: number; rMul: number };
+
+function buildMountainPeaks(playHalfX: number, playHalfZ: number): MountainPeak[] {
+  const peaks: MountainPeak[] = [];
+  // Soft falloff reaches 0 at `radius` from the peak — place centers so that
+  // distance to the play edge ≈ radius (slopes begin just outside the field).
+  const inset = MOUNTAIN_RADIUS;
+
+  const pushArc = (
+    count: number,
+    axis: "x" | "z",
+    sign: 1 | -1,
+  ) => {
+    for (let i = 0; i < count; i++) {
+      const t = (i + 0.5) / count;
+      const along = (t - 0.5) * 2;
+      let x = 0;
+      let z = 0;
+      if (axis === "z") {
+        z = sign * (playHalfZ + inset);
+        // Keep peaks over the border strip, not deep into the corners' exclusive zone
+        x = along * (playHalfX * 0.72);
+      } else {
+        x = sign * (playHalfX + inset);
+        z = along * (playHalfZ * 0.72);
+      }
+      const hMul = 0.82 + (1 - Math.abs(along)) * 0.22;
+      const rMul = 0.92 + Math.abs(along) * 0.1;
+      peaks.push({ x, z, hMul, rMul });
+    }
+  };
+
+  pushArc(5, "z", 1);
+  pushArc(5, "z", -1);
+  pushArc(4, "x", 1);
+  pushArc(4, "x", -1);
+
+  // Corner peaks — same inset so the field stays flat into the corners
+  const cornerInset = inset * 0.92;
+  for (const [sx, sz] of [
+    [1, 1],
+    [1, -1],
+    [-1, 1],
+    [-1, -1],
+  ] as const) {
+    peaks.push({
+      x: sx * (playHalfX + cornerInset),
+      z: sz * (playHalfZ + cornerInset),
+      hMul: 1.08,
+      rMul: 1.0,
+    });
+  }
+  return peaks;
+}
+
+/**
+ * Flat meadow with a soft central hill and a rim of taller mountains.
+ * Sampled only at coarse vertices — facets come from low subdivision.
+ */
+function sampleHeightMap(
+  x: number,
+  z: number,
+  peaks: MountainPeak[],
+): number {
+  let h = softHill(x, z, 0, 0, HILL_RADIUS, HILL_HEIGHT);
+  for (const p of peaks) {
+    h = Math.max(
+      h,
+      softHill(
+        x,
+        z,
+        p.x,
+        p.z,
+        MOUNTAIN_RADIUS * p.rMul,
+        MOUNTAIN_HEIGHT * p.hMul,
+      ),
+    );
+  }
+  return h;
+}
+
+/** Large triangles so hills read as clear low-poly facets. */
+const GROUND_SUBDIV_X = 22;
+const GROUND_SUBDIV_Z = 28;
 
 /** Height on a triangle given local UV (u,v) in [0,1]² of a ground cell. */
 function heightOnCellTriangle(
@@ -229,6 +318,8 @@ function buildGroundSamplers(
   positions: number[],
   width: number,
   depth: number,
+  subdivX: number,
+  subdivZ: number,
 ): {
   getGroundYAt: (x: number, z: number) => number;
   getGroundTiltAt: (
@@ -239,10 +330,10 @@ function buildGroundSamplers(
 } {
   const halfX = width * 0.5;
   const halfZ = depth * 0.5;
-  const cols = GROUND_SUBDIV_X + 1;
-  const rows = GROUND_SUBDIV_Z + 1;
-  const cellX = width / GROUND_SUBDIV_X;
-  const cellZ = depth / GROUND_SUBDIV_Z;
+  const cols = subdivX + 1;
+  const rows = subdivZ + 1;
+  const cellX = width / subdivX;
+  const cellZ = depth / subdivZ;
   const heights = new Float32Array(rows * cols);
   // CreateGround packs vertices row-major with row 0 at +Z.
   for (let i = 0, vi = 0; i < positions.length; i += 3, vi++) {
@@ -261,10 +352,10 @@ function buildGroundSamplers(
     y01: number;
     y11: number;
   } {
-    const colF = ((x + halfX) / width) * GROUND_SUBDIV_X;
-    const rowF = ((halfZ - z) / depth) * GROUND_SUBDIV_Z;
-    const col0 = Math.max(0, Math.min(GROUND_SUBDIV_X - 1, Math.floor(colF)));
-    const row0 = Math.max(0, Math.min(GROUND_SUBDIV_Z - 1, Math.floor(rowF)));
+    const colF = ((x + halfX) / width) * subdivX;
+    const rowF = ((halfZ - z) / depth) * subdivZ;
+    const col0 = Math.max(0, Math.min(subdivX - 1, Math.floor(colF)));
+    const row0 = Math.max(0, Math.min(subdivZ - 1, Math.floor(rowF)));
     return {
       row0,
       col0,
@@ -397,6 +488,7 @@ const FALL_ANGLE = Math.PI / 2 - 0.08;
 /**
  * Rectangular meadow battlefield (wider N–S). Grass tufts are decorative only.
  * Trees block infantry; tanks ram them over. Rocks block everyone on foot.
+ * Ground mesh extends past the play rect for a rim of snow-capped mountains.
  */
 export function createTerrain(
   scene: Scene,
@@ -413,16 +505,27 @@ export function createTerrain(
   const rand = seededRandom(42);
   const halfX = width * 0.5;
   const halfZ = depth * 0.5;
+  const mountainPeaks = buildMountainPeaks(halfX, halfZ);
+  const heightAt = (x: number, z: number) => sampleHeightMap(x, z, mountainPeaks);
+
+  // Playfield + mountain border
+  const worldW = width + MOUNTAIN_BORDER * 2;
+  const worldD = depth + MOUNTAIN_BORDER * 2;
+
+  const grassCol = Color3.FromHexString(WORLD_COLORS.grass);
+  const mountainCol = Color3.FromHexString(WORLD_COLORS.mountain);
+  const mountainDarkCol = Color3.FromHexString(WORLD_COLORS.mountainDark);
+  const snowCol = Color3.FromHexString(WORLD_COLORS.snow);
 
   const groundMat = new StandardMaterial("groundMat", scene);
-  groundMat.diffuseColor = Color3.FromHexString(WORLD_COLORS.grass);
+  groundMat.diffuseColor = Color3.White();
   groundMat.specularColor = new Color3(0.05, 0.08, 0.04);
 
   const ground = MeshBuilder.CreateGround(
     "ground",
     {
-      width,
-      height: depth,
+      width: worldW,
+      height: worldD,
       subdivisionsX: GROUND_SUBDIV_X,
       subdivisionsY: GROUND_SUBDIV_Z,
     },
@@ -432,9 +535,9 @@ export function createTerrain(
   ground.parent = root;
   ground.receiveShadows = true;
 
-  let getGroundYAt: (x: number, z: number) => number = sampleHeightMap;
+  let getGroundYAt: (x: number, z: number) => number = heightAt;
   let getGroundYAtFootprint: (x: number, z: number, radius: number) => number =
-    (x, z) => sampleHeightMap(x, z);
+    (x, z) => heightAt(x, z);
   let getGroundTiltAt: (
     x: number,
     z: number,
@@ -444,16 +547,59 @@ export function createTerrain(
   if (positions) {
     const pos = positions as number[];
     for (let i = 0; i < pos.length; i += 3) {
-      pos[i + 1] = sampleHeightMap(pos[i], pos[i + 2]);
+      pos[i + 1] = heightAt(pos[i], pos[i + 2]);
     }
-    flattenSlotPads(pos, sampleHeightMap);
+    flattenSlotPads(pos, heightAt);
     ground.updateVerticesData("position", pos);
-    const samplers = buildGroundSamplers(pos, width, depth);
+    // Faceted normals — large triangles read clearly as low-poly
+    ground.convertToFlatShadedMesh();
+
+    // Color after flat-shade so duplicated verts keep gray / snow tints
+    const flatPos = ground.getVerticesData("position");
+    if (flatPos) {
+      const colors = new Float32Array((flatPos.length / 3) * 4);
+      for (let i = 0, ci = 0; i < flatPos.length; i += 3, ci += 4) {
+        const x = flatPos[i];
+        const y = flatPos[i + 1];
+        const z = flatPos[i + 2];
+        const centerOnly = softHill(x, z, 0, 0, HILL_RADIUS, HILL_HEIGHT);
+        const rim = Math.max(0, y - centerOnly);
+        const outsidePlay =
+          Math.abs(x) > halfX - 0.5 || Math.abs(z) > halfZ - 0.5;
+
+        let r = grassCol.r;
+        let g = grassCol.g;
+        let b = grassCol.b;
+        if (outsidePlay && rim > 0.15) {
+          const rockT = Math.min(1, rim / (MOUNTAIN_HEIGHT * 0.35));
+          const snowT = Math.min(
+            1,
+            Math.max(0, (y - MOUNTAIN_HEIGHT * 0.48) / (MOUNTAIN_HEIGHT * 0.35)),
+          );
+          const rock = Color3.Lerp(mountainDarkCol, mountainCol, rockT);
+          const final = Color3.Lerp(rock, snowCol, snowT * snowT);
+          r = final.r;
+          g = final.g;
+          b = final.b;
+        }
+        colors[ci] = r;
+        colors[ci + 1] = g;
+        colors[ci + 2] = b;
+        colors[ci + 3] = 1;
+      }
+      ground.setVerticesData(VertexBuffer.ColorKind, colors);
+    }
+
+    const samplers = buildGroundSamplers(
+      pos,
+      worldW,
+      worldD,
+      GROUND_SUBDIV_X,
+      GROUND_SUBDIV_Z,
+    );
     getGroundYAt = samplers.getGroundYAt;
     getGroundTiltAt = samplers.getGroundTiltAt;
     getGroundYAtFootprint = buildGroundYAtFootprint(getGroundYAt);
-    // Faceted normals — large triangles read clearly as low-poly
-    ground.convertToFlatShadedMesh();
   }
 
   function removeObstacle(obs: Obstacle): void {

@@ -252,11 +252,20 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   camera.mapPanning = true;
   camera.panningSensibility = 55;
   camera.panningInertia = 0.6;
-  camera.panningDistanceLimit = Math.hypot(halfX, halfZ) - 4;
+  // Custom forward limit based on ally progress — no radial pan cap
+  camera.panningDistanceLimit = 0;
   // Left-drag pans (no Ctrl / no orbit). Wheel zoom removed below.
   camera.attachControl(true, false, 0);
   camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
   camera.useInputToRestoreState = false;
+
+  /** How far past the frontmost ally the player may drag (world Z). */
+  const CAM_OVERSHOOT_Z = 5.5;
+  /** Ease rate when rubberbanding / auto-retreating (higher = snappier). */
+  const CAM_RETURN_RATE = 4.2;
+  const CAM_TARGET_Y = 0.4;
+  const CAM_LIM_X = halfX - 2.2;
+  const CAM_MIN_Z = -buildingZ - 2.5;
 
   const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.3), scene);
   hemi.intensity = 0.75;
@@ -1647,21 +1656,97 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     });
   }
 
-  // Click vs drag on platforms
+  // Click vs drag on platforms + camera pan tracking
   let pointerDown: { x: number; y: number } | null = null;
+  let camDragging = false;
+
+  /**
+   * Furthest ally progress toward the enemy (+Z for blue).
+   * Empty pads count so the home line is always reachable.
+   */
+  function allyFrontZ(): number {
+    let front = -buildingZ;
+    for (const slot of slots) {
+      if (slot.team !== PLAYER_TEAM) continue;
+      front = Math.max(front, slot.z);
+      const b = slot.building;
+      if (b && !b.destroyed) {
+        front = Math.max(front, b.root.position.z);
+      }
+    }
+    for (const turret of turrets) {
+      if (turret.team !== PLAYER_TEAM || turret.destroyed) continue;
+      front = Math.max(front, turret.root.position.z);
+    }
+    for (const agent of agents) {
+      if (agent.unit.team !== PLAYER_TEAM || agent.unit.destroyed) continue;
+      front = Math.max(front, agent.unit.root.position.z);
+    }
+    return front;
+  }
+
+  function stopCameraInertia(): void {
+    camera.inertialPanningX = 0;
+    camera.inertialPanningY = 0;
+  }
+
+  /**
+   * Clamp pan to ally front on +Z. While dragging, allow a short overshoot;
+   * on release (or when the front retreats), ease back to the soft max.
+   */
+  function updateCameraBounds(dt: number): void {
+    const softMaxZ = allyFrontZ();
+    const hardMaxZ = softMaxZ + CAM_OVERSHOOT_Z;
+
+    let x = camera.target.x;
+    let z = camera.target.z;
+    x = Math.max(-CAM_LIM_X, Math.min(CAM_LIM_X, x));
+    z = Math.max(CAM_MIN_Z, z);
+
+    if (camDragging) {
+      if (z > hardMaxZ) {
+        z = hardMaxZ;
+        stopCameraInertia();
+      }
+    } else if (z > softMaxZ) {
+      // Rubberband / retreat toward the current front — never auto-push forward
+      const t = Math.min(1, CAM_RETURN_RATE * dt);
+      z += (softMaxZ - z) * t;
+      if (z - softMaxZ < 0.02) z = softMaxZ;
+      stopCameraInertia();
+    }
+
+    camera.target.x = x;
+    camera.target.y = CAM_TARGET_Y;
+    camera.target.z = z;
+  }
+
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     pointerDown = { x: e.clientX, y: e.clientY };
+    camDragging = false;
   };
-  const onPointerUp = (e: PointerEvent) => {
-    if (!pointerDown || e.button !== 0) {
-      pointerDown = null;
-      return;
-    }
+  const onPointerMove = (e: PointerEvent) => {
+    if (!pointerDown || (e.buttons & 1) === 0) return;
     const dx = e.clientX - pointerDown.x;
     const dy = e.clientY - pointerDown.y;
+    if (dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) {
+      camDragging = true;
+    }
+  };
+  const onPointerUp = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    const wasDragging = camDragging;
+    const down = pointerDown;
     pointerDown = null;
-    if (dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) return;
+    camDragging = false;
+    if (!down) return;
+    const dx = e.clientX - down.x;
+    const dy = e.clientY - down.y;
+    if (wasDragging || dx * dx + dy * dy > CLICK_DRAG_PX * CLICK_DRAG_PX) {
+      // Released after a pan — rubberband runs in updateCameraBounds
+      return;
+    }
     if (gameOver) return;
 
     const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) =>
@@ -1671,8 +1756,15 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     const slot = pickToSlot.get(pick.pickedMesh.uniqueId);
     if (slot) openSlotModal(slot);
   };
+  const onPointerCancel = () => {
+    pointerDown = null;
+    camDragging = false;
+  };
   canvas.addEventListener("pointerdown", onPointerDown);
+  canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
+  canvas.addEventListener("pointercancel", onPointerCancel);
+  window.addEventListener("pointerup", onPointerUp);
 
   for (const turret of turrets) wireTurretCombat(turret);
 
@@ -1729,6 +1821,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     elapsed += dt;
     terrain.update(dt, elapsed);
     hud.update(dt);
+    updateCameraBounds(dt);
 
     if (!gameOver) {
       // Passive income — HUD tweens; no floating +N
@@ -1908,7 +2001,10 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     scene,
     dispose: () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
+      canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
+      canvas.removeEventListener("pointercancel", onPointerCancel);
+      window.removeEventListener("pointerup", onPointerUp);
       hud.dispose();
       coinFx.dispose();
       captureFlag.dispose();

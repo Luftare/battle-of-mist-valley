@@ -35,6 +35,12 @@ export const WORLD_COLORS = {
   rock: "#7a7a72",
   rockDark: "#55554e",
   rockLight: "#9a9a90",
+  /** Distant mountain body — cool gray. */
+  mountain: "#6e7278",
+  mountainDark: "#4a4e54",
+  mountainLight: "#8a8e94",
+  snow: "#eef2f6",
+  snowShade: "#c8d0da",
   metal: "#4a4a48",
   metalDark: "#2e2e2c",
   skin: "#c4a882",
