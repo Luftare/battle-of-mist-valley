@@ -301,12 +301,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     }
   }
 
-  // Three defensive turrets per team, evenly spaced just ahead of the base
+  // Three defensive turrets per team, spaced like CSS space-around (inset from edges)
   for (const team of ["blue", "red"] as const) {
     const zSign = team === "blue" ? -1 : 1;
     const tz = zSign * (buildingZ - TURRET_FORWARD_FROM_BASE);
     for (let i = 0; i < TURRETS_PER_TEAM; i++) {
-      const t = TURRETS_PER_TEAM <= 1 ? 0.5 : i / (TURRETS_PER_TEAM - 1);
+      const t = (i + 0.5) / TURRETS_PER_TEAM;
       const tx = xMin + (xMax - xMin) * t;
       const label =
         i === 0 ? "W" : i === TURRETS_PER_TEAM - 1 ? "E" : `M${i}`;
@@ -694,6 +694,36 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return best;
   }
 
+  /** True when this agent is in range and aiming/locking the victim (actively shooting). */
+  function isEngagingVictim(attacker: Agent, victim: UnitHandle): boolean {
+    if (attacker.unit.destroyed) return false;
+    if (attacker.lockedUnit !== victim && attacker.focus !== victim) return false;
+    return (
+      distXZ(attacker.unit.root.position, victim.root.position) <=
+      engageRange(attacker.unit, victim)
+    );
+  }
+
+  /**
+   * Closest enemy unit currently shooting at `victim`.
+   * Used so we drop chase targets and answer fire.
+   */
+  function findEnemyEngaging(victim: UnitHandle): UnitHandle | null {
+    const pos = victim.root.position;
+    let best: UnitHandle | null = null;
+    let bestDist = Infinity;
+    for (const other of agents) {
+      if (!canTargetUnit(victim, other.unit)) continue;
+      if (!isEngagingVictim(other, victim)) continue;
+      const d = distXZ(pos, other.unit.root.position);
+      if (d < bestDist) {
+        bestDist = d;
+        best = other.unit;
+      }
+    }
+    return best;
+  }
+
   function findBuildingInRange(unit: UnitHandle): CombatEntity | null {
     const pos = unit.root.position;
     let best: CombatEntity | null = null;
@@ -720,10 +750,10 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return best;
   }
 
-  /** Nearest living enemy build-slot structure (for base assault after arrival). */
-  function findClosestEnemyBuilding(unit: UnitHandle): BuildingHandle | null {
+  /** Nearest living enemy structure (built slot or map turret) for base assault. */
+  function findClosestEnemyStructure(unit: UnitHandle): CombatEntity | null {
     const pos = unit.root.position;
-    let best: BuildingHandle | null = null;
+    let best: CombatEntity | null = null;
     let bestDist = Infinity;
     for (const slot of slots) {
       const b = slot.building;
@@ -732,6 +762,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       if (d < bestDist) {
         bestDist = d;
         best = b;
+      }
+    }
+    for (const turret of turrets) {
+      if (turret.destroyed || turret.team === unit.team) continue;
+      const d = distXZ(pos, turret.root.position);
+      if (d < bestDist) {
+        bestDist = d;
+        best = turret;
       }
     }
     return best;
@@ -1055,6 +1093,25 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       agent.lockedUnit = null;
     }
 
+    // Prefer enemies actively shooting us over a passive / out-of-reach chase target
+    const attacker = findEnemyEngaging(unit);
+    if (attacker) {
+      const locked = agent.lockedUnit;
+      const lockedAgent = locked
+        ? agents.find((a) => a.unit === locked)
+        : undefined;
+      const lockedFightsUs = lockedAgent
+        ? isEngagingVictim(lockedAgent, unit)
+        : false;
+      if (!locked || locked === attacker || !lockedFightsUs) {
+        if (locked !== attacker) {
+          agent.lockedUnit = attacker;
+          agent.bypass = null;
+          agent.stuckTimer = 0;
+        }
+      }
+    }
+
     if (!agent.lockedUnit) {
       agent.lockedUnit = findUnitToLock(unit);
       if (agent.lockedUnit) {
@@ -1086,9 +1143,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       return;
     }
 
-    // At the enemy base: siege the closest living building until none remain
+    // At the enemy base: siege the closest living building or turret until none remain
     if (agent.arrived) {
-      const siege = findClosestEnemyBuilding(unit);
+      const siege = findClosestEnemyStructure(unit);
       if (siege) {
         agent.focus = siege;
         const d = distXZ(unit.root.position, siege.root.position);
@@ -1446,6 +1503,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
           camera.globalPosition,
         );
       }
+      if (gameOver) continue;
       slot.spawnCooldown -= dt;
       if (slot.spawnCooldown <= 0) {
         spawnFrom(slot);
@@ -1453,18 +1511,61 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     }
 
-    for (let i = 0; i < turrets.length; i++) {
-      updateTurret(turrets[i], turretHpBars[i]);
-      turrets[i].update(dt, elapsed);
-    }
+    if (gameOver) {
+      // Freeze living combatants — no moves, aims, or shots
+      for (const agent of agents) {
+        const unit = agent.unit;
+        if (unit.destroyed) {
+          agent.hpBar.setVisible(false);
+          continue;
+        }
+        unit.setCombat(false);
+        unit.setMoving(false);
+        unit.setAimTarget(null);
+        agent.lockedUnit = null;
+        agent.focus = null;
+        agent.hpBar.setRatio(unit.hp / unit.maxHp);
+        agent.hpBar.update(
+          unit.root.getAbsolutePosition(),
+          UNIT_STATS[unit.kind as UnitKind].hpBarHeight,
+          camera.globalPosition,
+        );
+      }
+      for (let i = 0; i < turrets.length; i++) {
+        const turret = turrets[i];
+        const hpBar = turretHpBars[i];
+        if (turret.destroyed) {
+          turret.setAimTarget(null);
+          hpBar.setVisible(false);
+          continue;
+        }
+        turret.setAimTarget(null);
+        turretAim.set(turret, null);
+        hpBar.setRatio(turret.hp / turret.maxHp);
+        hpBar.update(
+          turret.root.getAbsolutePosition(),
+          TURRET_HP_BAR_HEIGHT,
+          camera.globalPosition,
+        );
+      }
+    } else {
+      for (let i = 0; i < turrets.length; i++) {
+        updateTurret(turrets[i], turretHpBars[i]);
+        turrets[i].update(dt, elapsed);
+      }
 
-    for (const agent of agents) {
-      if (agent.unit.destroyed) noteUnitDeath(agent.unit);
-      updateAgent(agent, dt);
+      for (const agent of agents) {
+        if (agent.unit.destroyed) noteUnitDeath(agent.unit);
+        updateAgent(agent, dt);
+      }
+      resolveUnitSeparation(dt);
     }
-    resolveUnitSeparation(dt);
 
     for (const agent of agents) agent.unit.update(dt, elapsed);
+    if (gameOver) {
+      // Keep wreck sinks / smoke going without combat AI
+      for (const turret of turrets) turret.update(dt, elapsed);
+    }
 
     // Keep living units seated on the low-poly ground facets
     const tiltSpeed = 2.8; // rad/s — ease across facet edges

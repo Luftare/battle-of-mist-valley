@@ -10,6 +10,7 @@ import { HILL_HEIGHT, HILL_RADIUS, PLAY_DEPTH, PLAY_WIDTH } from "../game/stats"
 import {
   getBuildingSlotPositions,
   inBuildingBand,
+  nearTurret,
   PLATFORM_PAD_HALF_D,
   PLATFORM_PAD_HALF_W,
 } from "../game/slotLayout";
@@ -503,6 +504,7 @@ export function createTerrain(
     } while (
       (Math.abs(x) < 2.2 ||
         inBuildingBand(x, z, halfX, halfZ) ||
+        nearTurret(x, z, halfX, halfZ) ||
         tooCloseToProps(x, z)) &&
       attempts < 80
     );
@@ -571,6 +573,7 @@ export function createTerrain(
     } while (
       (Math.abs(x) < 1.8 ||
         inBuildingBand(x, z, halfX, halfZ) ||
+        nearTurret(x, z, halfX, halfZ) ||
         tooCloseToProps(x, z)) &&
       attempts < 80
     );
