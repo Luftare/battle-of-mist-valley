@@ -13,6 +13,8 @@ export interface PlatformHandle {
   team: Team;
   slotIndex: number;
   setHighlight: (on: boolean) => void;
+  /** Show/hide the dirt pad + stakes (hidden while a building occupies the slot). */
+  setSiteVisible: (visible: boolean) => void;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 }
@@ -176,7 +178,13 @@ export function createPlatform(
     setHighlight: (on) => {
       hi.setEnabled(on);
     },
+    setSiteVisible: (visible) => {
+      base.setEnabled(visible);
+      facing.setEnabled(visible);
+      if (!visible) hi.setEnabled(false);
+    },
     update: (_dt, time) => {
+      if (!facing.isEnabled()) return;
       const t = time + phase;
       for (let i = 0; i < ribbons.length; i++) {
         ribbons[i].rotation.y = Math.sin(t * 2.2 + i * 0.8) * 0.35;

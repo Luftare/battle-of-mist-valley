@@ -22,6 +22,8 @@ export interface BuildingHandle extends CombatEntity {
   /** Owner-initiated teardown (no refund). */
   beginCollapse: () => void;
   readonly collapsing: boolean;
+  /** True while the structure is still being erected (not yet operational). */
+  readonly constructing: boolean;
   readonly destroyed: boolean;
   readonly expired: boolean;
   update: (dt: number, time: number) => void;

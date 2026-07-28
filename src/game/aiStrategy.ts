@@ -23,6 +23,8 @@ export interface AiSnapshot {
   empty: AiSlotView[];
   occupied: AiSlotView[];
   researching: boolean;
+  /** True when a research lab is finished constructing. */
+  labReady: boolean;
   tech: Record<UpgradeId, number>;
   /** Seconds since match start — used for phase timing. */
   elapsed: number;
@@ -42,6 +44,10 @@ export type AiStrategyId =
   | "supplyLogistics"
   | "infantryTank"
   | "infantryHeli"
+  | "factoryAllIn"
+  | "heliAllIn"
+  | "escortedSupply"
+  | "centerInfantry"
   | "balanced";
 
 export interface AiBrain {
@@ -108,11 +114,34 @@ function canAfford(coins: number, kind: BuildingKind): boolean {
   return coins >= BUILDING_COST[kind];
 }
 
+function totalBuildings(snap: AiSnapshot): number {
+  return (
+    snap.counts.barracks +
+    snap.counts.depot +
+    snap.counts.factory +
+    snap.counts.helipad +
+    snap.counts.researchLab
+  );
+}
+
+/** Early economy cap: at most 4 depots; the 5th building must diversify. */
+const MAX_EARLY_DEPOTS = 4;
+
+function allowDepot(snap: AiSnapshot): boolean {
+  const depots = snap.counts.depot;
+  if (depots >= MAX_EARLY_DEPOTS) return false;
+  // First four can be depots; placing a 5th building cannot be another depot-only step
+  const total = totalBuildings(snap);
+  if (total >= 4 && depots === total) return false;
+  return true;
+}
+
 function tryBuild(
   snap: AiSnapshot,
   kind: BuildingKind,
   bias: SlotBias,
 ): AiAction | null {
+  if (kind === "depot" && !allowDepot(snap)) return null;
   if (!canAfford(snap.coins, kind) || snap.empty.length === 0) return null;
   const slot = sortByBias(snap.empty, bias)[0];
   return { type: "build", kind, slotIndex: slot.index };
@@ -155,7 +184,7 @@ function researchPriority(
   snap: AiSnapshot,
   preferred: UpgradeId[],
 ): AiAction | null {
-  if (snap.researching || snap.counts.researchLab < 1) return null;
+  if (snap.researching || !snap.labReady) return null;
   // Try preferred order first, then remaining upgrades so coins don't idle
   const ordered = [
     ...preferred,
@@ -179,18 +208,27 @@ function researchPriority(
   return { type: "research", id: pick };
 }
 
+function infantryTechComplete(snap: AiSnapshot): boolean {
+  return (
+    (snap.tech.infantryAccuracy ?? 0) >= UPGRADE_DEFS.infantryAccuracy.maxLevel &&
+    (snap.tech.infantryProd ?? 0) >= UPGRADE_DEFS.infantryProd.maxLevel
+  );
+}
+
 function mixBuild(
   snap: AiSnapshot,
   weights: Partial<Record<BuildingKind, number>>,
   bias: SlotBias,
 ): AiAction | null {
-  const kinds = (Object.keys(weights) as BuildingKind[]).filter(
-    (k) => (weights[k] ?? 0) > 0 && canAfford(snap.coins, k),
+  const adjusted = { ...weights };
+  if (!allowDepot(snap)) adjusted.depot = 0;
+  const kinds = (Object.keys(adjusted) as BuildingKind[]).filter(
+    (k) => (adjusted[k] ?? 0) > 0 && canAfford(snap.coins, k),
   );
   if (!kinds.length || snap.empty.length === 0) return null;
   // Prefer underrepresented kinds relative to weights
   const scored = kinds.map((k) => {
-    const w = weights[k] ?? 1;
+    const w = adjusted[k] ?? 1;
     const have = snap.counts[k] ?? 0;
     const score = w / (1 + have) + Math.random() * 0.15;
     return { k, score };
@@ -216,7 +254,9 @@ function makeBrain(
       // Honor pending rebuild from a prior sacrifice as soon as a pad is free
       if (state.pendingRebuild && snap.empty.length > 0) {
         const kind = state.pendingRebuild;
-        if (canAfford(snap.coins, kind)) {
+        if (kind === "depot" && !allowDepot(snap)) {
+          state.pendingRebuild = null;
+        } else if (canAfford(snap.coins, kind)) {
           state.pendingRebuild = null;
           const act = tryBuild(snap, kind, "any");
           if (act) return act;
@@ -260,7 +300,7 @@ function createBarracksRush(withLabVariant: boolean): AiBrain {
       "tankHp",
     ]);
     // Spend on tech when lab is up and we have spare coins
-    if (infantryTech && (snap.counts.researchLab > 0) && snap.coins >= 100) {
+    if (infantryTech && snap.labReady && snap.coins >= 100) {
       if (Math.random() < 0.7 || snap.empty.length === 0) return infantryTech;
     }
 
@@ -316,7 +356,10 @@ function createSupplyRush(variant: SupplyVariant): AiBrain {
     turrets: "Supply rush → turret tech → armor/air",
     logistics: "Supply + logistics tech → tanks & helicopters",
   };
-  const targetDepots = 2 + Math.floor(Math.random() * 2);
+  const targetDepots = Math.min(
+    MAX_EARLY_DEPOTS,
+    2 + Math.floor(Math.random() * 2),
+  );
   const transitionCoins =
     variant === "logistics" ? 220 + Math.floor(Math.random() * 60) : 160 + Math.floor(Math.random() * 70);
 
@@ -356,7 +399,7 @@ function createSupplyRush(variant: SupplyVariant): AiBrain {
     ) {
       return tech;
     }
-    if (tech && Math.random() < 0.65 && snap.counts.researchLab > 0) {
+    if (tech && Math.random() < 0.65 && snap.labReady) {
       // Prefer researching over expanding when we have spare cash
       if (snap.empty.length === 0 || snap.coins > 140) return tech;
     }
@@ -366,20 +409,33 @@ function createSupplyRush(variant: SupplyVariant): AiBrain {
       state.phase = 2;
     }
     if (snap.counts.depot >= targetDepots) state.phase = Math.max(state.phase, 1);
+    // Must diversify by the 5th building — leave the depot-only opening
+    if (!allowDepot(snap) && totalBuildings(snap) >= 4) {
+      state.phase = Math.max(state.phase, 2);
+    }
 
     if (state.phase < 2) {
       const bias: SlotBias = snap.counts.depot < 1 ? "center" : "any";
-      const depotAct = tryBuild(snap, "depot", bias);
-      if (depotAct && snap.counts.depot < targetDepots) return depotAct;
+      if (allowDepot(snap) && snap.counts.depot < targetDepots) {
+        const depotAct = tryBuild(snap, "depot", bias);
+        if (depotAct) return depotAct;
+      }
+      // Diversify once depot target / early cap is hit
       if (variant === "tanks") {
         const tank = tryBuild(snap, "factory", "any");
         if (tank) return tank;
+      } else {
+        const diversify =
+          tryBuild(snap, "factory", "any") ??
+          tryBuild(snap, "helipad", "any") ??
+          tryBuild(snap, "barracks", "any");
+        if (diversify) return diversify;
       }
       if (tech) return tech;
-      return depotAct ?? { type: "noop" };
+      return { type: "noop" };
     }
 
-    // Late: tanks and/or helicopters
+    // Late: tanks and/or helicopters (depot weight respected by allowDepot)
     const mix =
       variant === "tanks"
         ? mixBuild(snap, { factory: 1.6, helipad: 0.5, depot: 0.2 }, "any")
@@ -419,7 +475,7 @@ function createInfantryTank(): AiBrain {
         if (act) return act;
       }
 
-      if (tech && snap.counts.researchLab > 0 && (snap.empty.length === 0 || Math.random() < 0.55)) {
+      if (tech && snap.labReady && (snap.empty.length === 0 || Math.random() < 0.55)) {
         return tech;
       }
 
@@ -478,7 +534,7 @@ function createInfantryHeli(): AiBrain {
 
       // Research missiles before committing to air
       if (
-        snap.counts.researchLab > 0 &&
+        snap.labReady &&
         snap.tech.heliMissiles < 1 &&
         !snap.researching
       ) {
@@ -549,7 +605,7 @@ function createBalanced(): AiBrain {
         if (act) return act;
       }
 
-      if (tech && snap.counts.researchLab > 0 && Math.random() < 0.6) {
+      if (tech && snap.labReady && Math.random() < 0.6) {
         return tech;
       }
 
@@ -572,6 +628,205 @@ function createBalanced(): AiBrain {
 }
 
 /**
+ * Pure armor or air spam — no depots. Mid-game: sacrifice one producer for a
+ * lab and finish the matching tech tree.
+ */
+function createAllInProducer(
+  producer: "factory" | "helipad",
+): AiBrain {
+  const isTanks = producer === "factory";
+  const id: AiStrategyId = isTanks ? "factoryAllIn" : "heliAllIn";
+  const label = isTanks
+    ? "All-in factories → tank lab"
+    : "All-in helipads → missile lab";
+  const targetCount = 3 + Math.floor(Math.random() * 2); // 3–4 producers
+  const labCoins =
+    BUILDING_COST.researchLab +
+    (isTanks ? 160 : 140) +
+    Math.floor(Math.random() * 80);
+  const upgrades: UpgradeId[] = isTanks
+    ? ["tankFireRate", "tankHp", "tankSplash", "turretRange", "turretRegen"]
+    : ["heliMissiles", "turretRange", "turretRegen", "tankFireRate"];
+
+  return makeBrain(id, label, (snap, state) => {
+    const tech = researchPriority(snap, upgrades);
+    const have = snap.counts[producer];
+
+    if (
+      !state.transitionArmed &&
+      snap.coins >= labCoins &&
+      have >= Math.min(2, targetCount)
+    ) {
+      state.transitionArmed = true;
+    }
+    if (have >= targetCount && snap.coins >= BUILDING_COST.researchLab + 40) {
+      state.transitionArmed = true;
+    }
+
+    // Lab via empty pad or by sacrificing one producer — never a depot
+    if (state.transitionArmed && snap.counts.researchLab === 0) {
+      const act =
+        tryBuild(snap, "researchLab", "any") ??
+        tryCollapseFor(snap, producer, "researchLab");
+      if (act) return act;
+    }
+
+    // Burn coins into the full tank / heli tech path once the lab is live
+    if (tech && snap.labReady) {
+      if (snap.empty.length === 0 || Math.random() < 0.72) return tech;
+    }
+
+    // Keep flooding the chosen producer; center first, then anywhere
+    const bias: SlotBias = have < 2 ? "center" : Math.random() < 0.4 ? "sides" : "any";
+    const build = tryBuild(snap, producer, bias);
+    if (build) return build;
+
+    if (tech) return tech;
+    return { type: "noop" };
+  });
+}
+
+/**
+ * Barracks escort depots, sacrifice a depot for lab + infantry tech, then
+ * convert remaining depots into more barracks.
+ */
+function createEscortedSupply(): AiBrain {
+  const earlyDepots = Math.min(MAX_EARLY_DEPOTS, 2 + Math.floor(Math.random() * 2));
+  const labCoins = 170 + Math.floor(Math.random() * 80);
+
+  return makeBrain(
+    "escortedSupply",
+    "Escorted supply → lab → infantry tech → all barracks",
+    (snap, state) => {
+      const tech = researchPriority(snap, [
+        "infantryProd",
+        "infantryAccuracy",
+        "turretRange",
+        "turretRegen",
+      ]);
+
+      // Endgame: strip depots for barracks once infantry tech is done
+      if (
+        state.phase >= 3 ||
+        (snap.labReady && infantryTechComplete(snap) && snap.counts.depot > 0)
+      ) {
+        state.phase = Math.max(state.phase, 3);
+        if (snap.counts.depot > 0) {
+          const convert = tryCollapseFor(snap, "depot", "barracks");
+          if (convert) return convert;
+        }
+        const more = tryBuild(snap, "barracks", "any");
+        if (more) return more;
+        if (tech) return tech;
+        return { type: "noop" };
+      }
+
+      // Mid: replace a supply depot with the research lab
+      if (snap.counts.researchLab === 0) {
+        const readyForLab =
+          snap.counts.barracks >= 2 &&
+          snap.counts.depot >= 1 &&
+          snap.coins >= labCoins;
+        if (readyForLab) {
+          const act =
+            tryCollapseFor(snap, "depot", "researchLab") ??
+            tryBuild(snap, "researchLab", "any");
+          if (act) {
+            state.phase = Math.max(state.phase, 1);
+            return act;
+          }
+        }
+      } else {
+        state.phase = Math.max(state.phase, 1);
+      }
+
+      if (tech && snap.labReady && (snap.empty.length === 0 || Math.random() < 0.7)) {
+        return tech;
+      }
+
+      // Opening: keep barracks escorting depots (roughly barracks ≥ depots)
+      const b = snap.counts.barracks;
+      const d = snap.counts.depot;
+      if (b < 1) {
+        const act = tryBuild(snap, "barracks", "center");
+        if (act) return act;
+      }
+      if (allowDepot(snap) && d < earlyDepots && b >= d) {
+        const act = tryBuild(snap, "depot", d < 1 ? "center" : "sides");
+        if (act) return act;
+      }
+      if (b < d + 1 || b < 2) {
+        const act = tryBuild(snap, "barracks", b < 2 ? "center" : "sides");
+        if (act) return act;
+      }
+      if (allowDepot(snap) && d < earlyDepots) {
+        const act = tryBuild(snap, "depot", "any");
+        if (act) return act;
+      }
+      const moreBarracks = tryBuild(snap, "barracks", "any");
+      if (moreBarracks) return moreBarracks;
+      if (tech) return tech;
+      return { type: "noop" };
+    },
+  );
+}
+
+/**
+ * Three center barracks, one depot + lab, finish infantry tech, then expand barracks.
+ */
+function createCenterInfantry(): AiBrain {
+  return makeBrain(
+    "centerInfantry",
+    "3 center barracks + depot/lab → infantry tech → more barracks",
+    (snap, state) => {
+      const tech = researchPriority(snap, [
+        "infantryProd",
+        "infantryAccuracy",
+        "turretRange",
+        "turretRegen",
+      ]);
+
+      // 1) Three barracks on center pads
+      if (snap.counts.barracks < 3) {
+        const act = tryBuild(snap, "barracks", "center");
+        if (act) return act;
+      }
+
+      // 2) One supply depot
+      if (snap.counts.depot < 1 && allowDepot(snap)) {
+        const act = tryBuild(snap, "depot", "sides");
+        if (act) return act;
+      }
+
+      // 3) Research lab
+      if (snap.counts.researchLab === 0) {
+        const act =
+          tryBuild(snap, "researchLab", "any") ??
+          (snap.counts.depot >= 1
+            ? tryCollapseFor(snap, "depot", "researchLab")
+            : null);
+        if (act) return act;
+      }
+
+      // 4) Full infantry upgrades before sprawling further
+      if (snap.labReady && !infantryTechComplete(snap)) {
+        if (tech) return tech;
+      }
+
+      // 5) More barracks (keep the single depot if still standing)
+      if (snap.labReady) {
+        state.phase = Math.max(state.phase, 2);
+        const act = tryBuild(snap, "barracks", "any");
+        if (act) return act;
+      }
+
+      if (tech) return tech;
+      return { type: "noop" };
+    },
+  );
+}
+
+/**
  * Roll a random opening strategy for the enemy AI.
  * Weights favor readable archetypes without making one dominant.
  */
@@ -584,6 +839,10 @@ export function createAiBrain(): AiBrain {
     supplyLogistics: 0.8,
     infantryTank: 1.0,
     infantryHeli: 0.9,
+    factoryAllIn: 0.9,
+    heliAllIn: 0.85,
+    escortedSupply: 0.95,
+    centerInfantry: 0.9,
     balanced: 1.1,
   });
 
@@ -602,6 +861,14 @@ export function createAiBrain(): AiBrain {
       return createInfantryTank();
     case "infantryHeli":
       return createInfantryHeli();
+    case "factoryAllIn":
+      return createAllInProducer("factory");
+    case "heliAllIn":
+      return createAllInProducer("helipad");
+    case "escortedSupply":
+      return createEscortedSupply();
+    case "centerInfantry":
+      return createCenterInfantry();
     case "balanced":
     default:
       return createBalanced();

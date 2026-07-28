@@ -118,6 +118,8 @@ export const SUPPLY_TRUCK_COIN_AMOUNT = 1;
 
 /** Owner-initiated teardown duration (seconds). */
 export const COLLAPSE_DURATION_SEC = 4.5;
+/** Time from placement until a building is operational. */
+export const BUILD_DURATION_SEC = 10;
 
 /** Enemy AI thinks on this cadence. */
 export const AI_DECISION_INTERVAL_SEC = 10;

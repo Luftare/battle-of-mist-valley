@@ -260,13 +260,39 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
   camera.useInputToRestoreState = false;
 
-  /** How far past the frontmost ally the player may drag (world Z). */
-  const CAM_OVERSHOOT_Z = 5.5;
-  /** Ease rate when rubberbanding / auto-retreating (higher = snappier). */
-  const CAM_RETURN_RATE = 4.2;
+  /**
+   * Peek past ally front while dragging: logical overshoot is compressed with
+   * an asymptotic curve toward CAM_PEEK_LIMIT (limit as x→∞, never reached).
+   * Peeking enables follow mode; return-to-front runs after release.
+   */
+  const CAM_PEEK_LIMIT = 7.5;
+  /** Ease rate back to the front after releasing a peek / forced retreat. */
+  const CAM_RETURN_RATE = 4.0;
+  /** When the front advances, catch the soft limit quickly. */
+  const CAM_FRONT_ADVANCE_RATE = 10;
+  /** When the front retreats (e.g. lead unit dies), ease the limit back. */
+  const CAM_FRONT_RETREAT_RATE = 1.65;
+  /** Smooth-damp time for follow catch-up (higher = gentler accel). */
+  const CAM_FOLLOW_SMOOTH_TIME = 0.75;
+  const CAM_FOLLOW_MAX_SPEED = 16;
+  /** Ignore front dips smaller than this while following at the tip. */
+  const CAM_FOLLOW_RETREAT_DEADZONE = 1.35;
+  /** Peek past the front by this much to arm follow mode. */
+  const CAM_PEEK_FOLLOW_ARM = 0.2;
+  /** Backward pan (world −Z) past this disables follow. */
+  const CAM_FOLLOW_CANCEL_DELTA = 0.04;
   const CAM_TARGET_Y = 0.4;
   const CAM_LIM_X = halfX - 2.2;
   const CAM_MIN_Z = -buildingZ - 2.5;
+  /** Smoothed +Z pan limit — lags behind raw ally front on retreats. */
+  let smoothedFrontZ = -buildingZ;
+  /** Uncapped Z while peeking (null when synced to the displayed target). */
+  let camLogicalZ: number | null = null;
+  /** Last Z we wrote to the camera — used to measure pan input deltas. */
+  let lastDisplayedZ = 0;
+  /** After a peek, keep the camera tracking the lead until the player pans back. */
+  let camFollow = false;
+  let camFollowVel = 0;
 
   const hemi = new HemisphericLight("hemi", new Vector3(0.2, 1, 0.3), scene);
   hemi.intensity = 0.75;
@@ -417,7 +443,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   }
 
   function teamHasLab(team: Team): boolean {
-    return livingBuildings(team).some((b) => b.kind === "researchLab");
+    return livingBuildings(team).some(
+      (b) => b.kind === "researchLab" && !b.constructing,
+    );
   }
 
   function getUpgradeCards(team: Team): UpgradeCardState[] {
@@ -629,6 +657,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     hpBar.setRatio(1);
     slot.hpBar = hpBar;
     slot.spawnCooldown = 2.5 + Math.random() * 1.5;
+    slot.platform.setSiteVisible(false);
     return true;
   }
 
@@ -649,6 +678,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     slot.building.dispose();
     slot.building = null;
     slot.spawnCooldown = 0;
+    slot.platform.setSiteVisible(true);
   }
 
   function wireUnitCombat(unit: UnitHandle): void {
@@ -1455,6 +1485,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       empty,
       occupied,
       researching: activeResearch[AI_TEAM] !== null,
+      labReady: teamHasLab(AI_TEAM),
       tech: { ...techLevels[AI_TEAM] },
       elapsed,
     };
@@ -1529,7 +1560,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
     const occupied =
       slot.building && !slot.building.destroyed ? slot.building.kind : null;
-    researchModalOpen = occupied === "researchLab";
+    researchModalOpen =
+      occupied === "researchLab" && !slot.building!.constructing;
 
     hud.openBuildModal({
       coins: coins[PLAYER_TEAM],
@@ -1588,40 +1620,131 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return front;
   }
 
-  function stopCameraInertia(): void {
-    camera.inertialPanningX = 0;
-    camera.inertialPanningY = 0;
+  /** Map uncapped overshoot → (0, CAM_PEEK_LIMIT) — approaches but never hits. */
+  function asymptotePeek(rawOvershoot: number): number {
+    if (rawOvershoot <= 0) return 0;
+    return (CAM_PEEK_LIMIT * rawOvershoot) / (rawOvershoot + CAM_PEEK_LIMIT);
+  }
+
+  /** Inverse of asymptotePeek for seeding logical Z from a displayed peek. */
+  function invertAsymptotePeek(displayedOvershoot: number): number {
+    if (displayedOvershoot <= 0) return 0;
+    const d = Math.min(displayedOvershoot, CAM_PEEK_LIMIT * 0.999);
+    return (CAM_PEEK_LIMIT * d) / (CAM_PEEK_LIMIT - d);
+  }
+
+  /** Critically-damped chase — gentle accel without jitter on small target noise. */
+  function smoothDampZ(
+    current: number,
+    target: number,
+    smoothTime: number,
+    maxSpeed: number,
+    dt: number,
+  ): number {
+    const st = Math.max(0.0001, smoothTime);
+    const omega = 2 / st;
+    const x = omega * dt;
+    const exp = 1 / (1 + x + 0.48 * x * x + 0.235 * x * x * x);
+    let change = current - target;
+    const maxChange = maxSpeed * st;
+    change = Math.max(-maxChange, Math.min(maxChange, change));
+    const temp = (camFollowVel + omega * change) * dt;
+    camFollowVel = (camFollowVel - omega * temp) * exp;
+    let output = current - change + (change + temp) * exp;
+    if (target - current > 0 === output > target) {
+      output = target;
+      camFollowVel = 0;
+    }
+    return output;
   }
 
   /**
-   * Clamp pan to ally front on +Z. While dragging, allow a short overshoot;
-   * on release (or when the front retreats), ease back to the soft max.
+   * Soft +Z pan limit from ally front.
+   * Peeking remaps through an asymptotic curve and arms follow mode.
+   * Follow gently tracks the lead forward; backward drag cancels it.
    */
   function updateCameraBounds(dt: number): void {
-    const softMaxZ = allyFrontZ();
-    const hardMaxZ = softMaxZ + CAM_OVERSHOOT_Z;
+    const rawFront = allyFrontZ();
+    const frontRate =
+      rawFront >= smoothedFrontZ ? CAM_FRONT_ADVANCE_RATE : CAM_FRONT_RETREAT_RATE;
+    smoothedFrontZ += (rawFront - smoothedFrontZ) * (1 - Math.exp(-frontRate * dt));
+    const softMaxZ = smoothedFrontZ;
 
     let x = camera.target.x;
     let z = camera.target.z;
     x = Math.max(-CAM_LIM_X, Math.min(CAM_LIM_X, x));
-    z = Math.max(CAM_MIN_Z, z);
 
     if (camDragging) {
-      if (z > hardMaxZ) {
-        z = hardMaxZ;
-        stopCameraInertia();
+      const inputDelta = z - lastDisplayedZ;
+      if (camLogicalZ === null) {
+        if (z > softMaxZ) {
+          camLogicalZ = softMaxZ + invertAsymptotePeek(z - softMaxZ);
+        } else {
+          camLogicalZ = z;
+        }
+      } else {
+        camLogicalZ += inputDelta;
       }
-    } else if (z > softMaxZ) {
-      // Rubberband / retreat toward the current front — never auto-push forward
-      const t = Math.min(1, CAM_RETURN_RATE * dt);
-      z += (softMaxZ - z) * t;
-      if (z - softMaxZ < 0.02) z = softMaxZ;
-      stopCameraInertia();
+      camLogicalZ = Math.max(CAM_MIN_Z, camLogicalZ);
+
+      // Dragging homeward leaves the camera where the player put it
+      if (inputDelta < -CAM_FOLLOW_CANCEL_DELTA) {
+        camFollow = false;
+        camFollowVel = 0;
+      }
+
+      if (camLogicalZ > softMaxZ) {
+        const rawOver = camLogicalZ - softMaxZ;
+        z = softMaxZ + asymptotePeek(rawOver);
+        if (asymptotePeek(rawOver) >= CAM_PEEK_FOLLOW_ARM) {
+          camFollow = true;
+        }
+        const t = asymptotePeek(rawOver) / CAM_PEEK_LIMIT;
+        const keep = Math.max(0.04, 1 - t * t);
+        camera.inertialPanningX *= keep;
+        camera.inertialPanningY *= keep;
+      } else {
+        z = camLogicalZ;
+      }
+    } else {
+      camLogicalZ = null;
+      z = Math.max(CAM_MIN_Z, z);
+
+      if (z > softMaxZ) {
+        const overshoot = z - softMaxZ;
+        // While following, ignore tiny lead pushbacks; big collapses still pull back
+        const holdThroughDip =
+          camFollow && overshoot <= CAM_FOLLOW_RETREAT_DEADZONE;
+        if (holdThroughDip) {
+          camFollowVel = 0;
+          camera.inertialPanningX = 0;
+          camera.inertialPanningY = 0;
+        } else {
+          z = softMaxZ + overshoot * Math.exp(-CAM_RETURN_RATE * dt);
+          camera.inertialPanningX = 0;
+          camera.inertialPanningY = 0;
+          camFollowVel = 0;
+        }
+      } else if (camFollow) {
+        if (softMaxZ > z + 0.04) {
+          // Lead is forward — ease the view up with gentle acceleration
+          z = smoothDampZ(
+            z,
+            softMaxZ,
+            CAM_FOLLOW_SMOOTH_TIME,
+            CAM_FOLLOW_MAX_SPEED,
+            dt,
+          );
+        } else {
+          camFollowVel *= Math.exp(-6 * dt);
+        }
+      }
     }
 
     camera.target.x = x;
     camera.target.y = CAM_TARGET_Y;
     camera.target.z = z;
+    lastDisplayedZ = z;
   }
 
   const onPointerDown = (e: PointerEvent) => {
@@ -1798,6 +1921,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         );
       }
       if (gameOver) continue;
+      if (b.constructing) continue;
       if (b.kind === "researchLab") continue;
       slot.spawnCooldown -= dt;
       if (slot.spawnCooldown <= 0) {

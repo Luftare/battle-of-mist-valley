@@ -1,6 +1,7 @@
 import { Vector3, type TransformNode } from "@babylonjs/core";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 import {
+  BUILD_DURATION_SEC,
   BUILDING_MAX_HP,
   COLLAPSE_DURATION_SEC,
   CORPSE_LIFETIME_SEC,
@@ -19,18 +20,23 @@ interface BuildingCombatOpts {
 }
 
 /**
- * Adds HP, destruction sink, owner collapse, and CombatEntity methods.
+ * Adds HP, construction, destruction sink, owner collapse, and CombatEntity methods.
  */
 export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
   const maxHp = BUILDING_MAX_HP;
   let hp = maxHp;
   let destroyed = false;
   let collapsing = false;
+  let constructing = true;
+  let buildAge = 0;
+  let buildSettled = false;
   let expired = false;
   let sinkAge = 0;
   let collapseAge = 0;
-  const baseY = opts.root.position.y;
-  const baseScale = opts.root.scaling.x;
+  let baseY = opts.root.position.y;
+  let baseScale = opts.root.scaling.x;
+  /** How far below grade the building starts while erecting. */
+  const BUILD_RISE = 2.15;
   const hitPoint = new Vector3();
   let shake = 0;
   let smoke: WreckSmokeHandle | null = null;
@@ -58,6 +64,9 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
     get collapsing() {
       return collapsing;
     },
+    get constructing() {
+      return constructing;
+    },
     get destroyed() {
       return destroyed;
     },
@@ -71,7 +80,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       return p;
     },
     applyImpact: (_fromX, _fromZ, strength) => {
-      if (collapsing) return;
+      if (collapsing || constructing) return;
       shake = Math.min(0.35, shake + strength * 0.04);
     },
     takeDamage: (amount) => {
@@ -79,6 +88,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       hp = Math.max(0, hp - amount);
       if (hp <= 0) {
         destroyed = true;
+        constructing = false;
         sinkAge = 0;
         startWreckSmoke();
       }
@@ -86,6 +96,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
     beginCollapse: () => {
       if (destroyed || collapsing || expired) return;
       collapsing = true;
+      constructing = false;
       collapseAge = 0;
       // Stop counting as a living structure for combat / win checks
       destroyed = true;
@@ -113,6 +124,26 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
         opts.root.position.y = baseY - t * 2.4;
         smoke?.update();
         if (sinkAge >= CORPSE_LIFETIME_SEC) expired = true;
+        return;
+      }
+
+      if (constructing) {
+        // Capture resting pose after placeBuilding sets position/scale
+        if (!buildSettled) {
+          baseY = opts.root.position.y;
+          baseScale = Math.max(0.05, opts.root.scaling.x);
+          opts.root.scaling.setAll(baseScale);
+          buildSettled = true;
+        }
+        buildAge += dt;
+        const t = Math.min(1, buildAge / BUILD_DURATION_SEC);
+        const eased = t * t * (3 - 2 * t);
+        opts.root.position.y = baseY - BUILD_RISE * (1 - eased);
+        opts.root.scaling.setAll(baseScale);
+        if (t >= 1) {
+          constructing = false;
+          opts.root.position.y = baseY;
+        }
         return;
       }
 
