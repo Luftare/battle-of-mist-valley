@@ -220,6 +220,12 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
     get maxHp() {
       return combatState.maxHp;
     },
+    applyMaxHpBonus: (factor) => {
+      combatState.applyMaxHpBonus(factor);
+    },
+    setMissilesEnabled: () => {
+      /* tank — no missiles */
+    },
     get shootRange() {
       return combatState.shootRange;
     },

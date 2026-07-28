@@ -25,6 +25,8 @@ export interface TurretHandle extends CombatEntity {
   lastAttackerTeam: Team | null;
   setAimTarget: (target: CombatEntity | null) => void;
   setOnFire: (cb: (() => void) | null) => void;
+  /** Restore HP without exceeding max (research regen). */
+  heal: (amount: number) => void;
   /** World-space muzzle for the next barrel in the alternating pair. */
   getMuzzlePoint: () => Vector3;
   readonly destroyed: boolean;
@@ -281,6 +283,10 @@ export function createTurret(
         flashR.visibility = 0;
         aimTarget = null;
       }
+    },
+    heal: (amount) => {
+      if (destroyed || amount <= 0) return;
+      hp = Math.min(maxHp, hp + amount);
     },
     setAimTarget: (target) => {
       aimTarget = target;

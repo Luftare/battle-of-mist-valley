@@ -170,6 +170,12 @@ export function createRifleman(
     get maxHp() {
       return combatState.maxHp;
     },
+    applyMaxHpBonus: (factor) => {
+      combatState.applyMaxHpBonus(factor);
+    },
+    setMissilesEnabled: () => {
+      /* rifleman — no missiles */
+    },
     get shootRange() {
       return combatState.shootRange;
     },

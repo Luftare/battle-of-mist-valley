@@ -16,6 +16,13 @@ export interface UnitHandle extends CombatEntity {
   shootRange: number;
   moveSpeed: number;
   damage: number;
+  /** Scale max and current HP (research upgrades). */
+  applyMaxHpBonus: (factor: number) => void;
+  /**
+   * Helicopter: unlock guided missiles vs vehicles.
+   * No-op on other unit kinds.
+   */
+  setMissilesEnabled: (enabled: boolean) => void;
   /** Enter or leave combat animation (shooting pose / aim+fire). */
   setCombat: (active: boolean) => void;
   /**

@@ -3,14 +3,19 @@ import type { Team } from "../theme/colors";
 import type { CombatEntity } from "../game/combatEntity";
 import type { UnitKind } from "../game/stats";
 
-export type BuildingKind = "barracks" | "factory" | "helipad" | "depot";
+export type BuildingKind =
+  | "barracks"
+  | "factory"
+  | "helipad"
+  | "depot"
+  | "researchLab";
 
 export interface BuildingHandle extends CombatEntity {
   root: TransformNode;
   team: Team;
   kind: BuildingKind;
-  /** Unit type this building produces. */
-  spawns: UnitKind;
+  /** Unit type this building produces, or null for non-production buildings. */
+  spawns: UnitKind | null;
   hp: number;
   maxHp: number;
   takeDamage: (amount: number) => void;

@@ -13,7 +13,7 @@ interface BuildingCombatOpts {
   root: TransformNode;
   team: Team;
   kind: BuildingKind;
-  spawns: UnitKind;
+  spawns: UnitKind | null;
   updateAlive: (dt: number, time: number) => void;
   disposeVisuals: () => void;
 }

@@ -16,10 +16,12 @@ import {
   createFactory,
   createHelipad,
   createPlatform,
+  createResearchLab,
   createTurret,
   type BuildingHandle,
   type BuildingKind,
   type PlatformHandle,
+  type ResearchLabHandle,
   type TurretHandle,
 } from "../buildings";
 import { createCaptureFlag } from "../buildings/captureFlag";
@@ -53,8 +55,24 @@ import {
   AI_DECISION_INTERVAL_SEC,
   TURRET_BOUNTY,
   TURRET_HP_BAR_HEIGHT,
+  TURRET_SHOOT_RANGE,
   type UnitKind,
 } from "./stats";
+import {
+  createTeamTechLevels,
+  INFANTRY_ACCURACY_MUL,
+  INFANTRY_PROD_MUL,
+  SUPPLY_SPEED_BONUS_PER_LEVEL,
+  TANK_HP_MUL,
+  TANK_SPLASH_MUL,
+  TURRET_RANGE_MUL,
+  TURRET_REGEN_DELAY_SEC,
+  TURRET_REGEN_HP_PER_SEC,
+  UPGRADE_DEFS,
+  UPGRADE_IDS,
+  upgradeCost,
+  type UpgradeId,
+} from "./upgrades";
 import { spawnExplosion } from "../fx/explosion";
 import { spawnBulletTrace } from "../fx/bulletTrace";
 import { createCoinPopupFx } from "../fx/coinPopup";
@@ -68,7 +86,7 @@ import {
   type UnitHandle,
 } from "../units";
 import { approach, shortestAngleDelta } from "../units/types";
-import { createHud } from "../ui/hud";
+import { createHud, type UpgradeCardState } from "../ui/hud";
 
 /** Hull yaw rate (rad/s) — tanks turn in place before driving. */
 const TANK_HULL_TURN_SPEED = 0.45;
@@ -140,6 +158,7 @@ function createBuildingOfKind(
   if (kind === "barracks") return createBarracks(scene, name, team);
   if (kind === "factory") return createFactory(scene, name, team);
   if (kind === "depot") return createDepot(scene, name, team);
+  if (kind === "researchLab") return createResearchLab(scene, name, team);
   return createHelipad(scene, name, team);
 }
 
@@ -150,12 +169,17 @@ function distXZ(a: Vector3, b: Vector3): number {
 }
 
 /** Linear accuracy: 100% at 0 range → 50% at maxRange. */
-function rollAccuracy(distance: number, maxRange: number): boolean {
+function rollAccuracy(
+  distance: number,
+  maxRange: number,
+  accuracyMul = 1,
+): boolean {
   const t =
     maxRange <= 1e-6 ? 0 : Math.min(1, Math.max(0, distance / maxRange));
-  const accuracy =
+  const base =
     ACCURACY_AT_POINT_BLANK +
     (ACCURACY_AT_MAX_RANGE - ACCURACY_AT_POINT_BLANK) * t;
+  const accuracy = Math.min(1, base * accuracyMul);
   return Math.random() < accuracy;
 }
 
@@ -177,8 +201,13 @@ function scatterAim(from: Vector3, aim: Vector3, radius = MISS_SCATTER_RADIUS): 
   );
 }
 
-function spawnIntervalFor(kind: BuildingKind): number {
-  return kind === "barracks" ? BARRACKS_SPAWN_INTERVAL_SEC : SPAWN_INTERVAL_SEC;
+function spawnIntervalFor(kind: BuildingKind, infantryProdBonus = false): number {
+  if (kind === "researchLab") return Infinity;
+  if (kind === "barracks") {
+    const base = BARRACKS_SPAWN_INTERVAL_SEC;
+    return infantryProdBonus ? base / INFANTRY_PROD_MUL : base;
+  }
+  return SPAWN_INTERVAL_SEC;
 }
 
 /**
@@ -253,6 +282,24 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     red: STARTING_COINS,
   };
   hud.setCoins(coins[PLAYER_TEAM]);
+
+  interface ActiveResearch {
+    id: UpgradeId;
+    elapsed: number;
+    duration: number;
+  }
+
+  const techLevels: Record<Team, Record<UpgradeId, number>> = {
+    blue: createTeamTechLevels(),
+    red: createTeamTechLevels(),
+  };
+  const activeResearch: Record<Team, ActiveResearch | null> = {
+    blue: null,
+    red: null,
+  };
+  /** Wall-clock of last damage taken — used for out-of-combat regen. */
+  const turretLastHurt = new WeakMap<TurretHandle, number>();
+  let researchModalOpen = false;
 
   let anyUnitDestroyed = false;
   let gameOver = false;
@@ -366,11 +413,131 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       depot: 0,
       factory: 0,
       helipad: 0,
+      researchLab: 0,
     };
     for (const b of livingBuildings(team)) {
       counts[b.kind] += 1;
     }
     return counts;
+  }
+
+  function teamHasLab(team: Team): boolean {
+    return livingBuildings(team).some((b) => b.kind === "researchLab");
+  }
+
+  function getUpgradeCards(team: Team): UpgradeCardState[] {
+    const levels = techLevels[team];
+    const active = activeResearch[team];
+    return UPGRADE_IDS.map((id) => {
+      const def = UPGRADE_DEFS[id];
+      const level = levels[id];
+      const researching = active?.id === id;
+      return {
+        id,
+        level,
+        maxLevel: def.maxLevel,
+        cost: upgradeCost(def, level),
+        progress: researching && active ? active.elapsed / active.duration : null,
+        researching,
+        blocked: active !== null && !researching,
+      };
+    });
+  }
+
+  function syncLabVisuals(team: Team): void {
+    const active = activeResearch[team];
+    const progress = active ? active.elapsed / active.duration : 0;
+    for (const slot of slots) {
+      if (slot.team !== team || slot.building?.kind !== "researchLab") continue;
+      const lab = slot.building as ResearchLabHandle;
+      if (lab.destroyed) continue;
+      lab.setResearching(!!active, progress);
+    }
+  }
+
+  function applyUpgradeEffect(team: Team, id: UpgradeId): void {
+    if (id === "heliMissiles") {
+      for (const agent of agents) {
+        if (agent.unit.team === team && agent.unit.kind === "helicopter") {
+          agent.unit.setMissilesEnabled(true);
+        }
+      }
+    }
+    if (id === "turretRange") {
+      for (const turret of turrets) {
+        if (turret.team === team && !turret.destroyed) {
+          turret.shootRange = TURRET_SHOOT_RANGE * TURRET_RANGE_MUL;
+        }
+      }
+    }
+    if (id === "tankHp") {
+      for (const agent of agents) {
+        if (
+          agent.unit.team === team &&
+          agent.unit.kind === "tank" &&
+          !agent.unit.destroyed
+        ) {
+          agent.unit.applyMaxHpBonus(TANK_HP_MUL);
+        }
+      }
+    }
+  }
+
+  function completeResearch(team: Team, id: UpgradeId): void {
+    techLevels[team][id] += 1;
+    activeResearch[team] = null;
+    applyUpgradeEffect(team, id);
+    syncLabVisuals(team);
+    if (team === PLAYER_TEAM) {
+      hud.showUpgradeToast(UPGRADE_DEFS[id].label);
+      if (researchModalOpen) {
+        hud.refreshResearchModal(coins[PLAYER_TEAM], getUpgradeCards(PLAYER_TEAM));
+      }
+    }
+  }
+
+  function beginResearch(team: Team, id: UpgradeId): boolean {
+    if (activeResearch[team]) return false;
+    if (!teamHasLab(team)) return false;
+    const def = UPGRADE_DEFS[id];
+    const level = techLevels[team][id];
+    if (level >= def.maxLevel) return false;
+    const cost = upgradeCost(def, level);
+    if (!trySpend(team, cost)) return false;
+    activeResearch[team] = {
+      id,
+      elapsed: 0,
+      duration: def.durationSec,
+    };
+    syncLabVisuals(team);
+    if (team === PLAYER_TEAM && researchModalOpen) {
+      hud.refreshResearchModal(coins[PLAYER_TEAM], getUpgradeCards(PLAYER_TEAM));
+    }
+    return true;
+  }
+
+  function tickResearch(team: Team, dt: number): void {
+    const active = activeResearch[team];
+    if (!active) {
+      syncLabVisuals(team);
+      if (team === PLAYER_TEAM && researchModalOpen) {
+        hud.refreshResearchModal(coins[PLAYER_TEAM], getUpgradeCards(PLAYER_TEAM));
+      }
+      return;
+    }
+    if (!teamHasLab(team)) {
+      // Pause while no lab stands — progress is kept
+      syncLabVisuals(team);
+      return;
+    }
+    active.elapsed += dt;
+    syncLabVisuals(team);
+    if (team === PLAYER_TEAM && researchModalOpen) {
+      hud.refreshResearchModal(coins[PLAYER_TEAM], getUpgradeCards(PLAYER_TEAM));
+    }
+    if (active.elapsed >= active.duration) {
+      completeResearch(team, active.id);
+    }
   }
 
   function addCoins(
@@ -494,22 +661,34 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
 
       const maxRange = engageRange(unit, target);
-      const didHit = rollAccuracy(distXZ(from, hit), maxRange);
+      const accuracyMul =
+        unit.kind === "rifleman" && techLevels[unit.team].infantryAccuracy > 0
+          ? INFANTRY_ACCURACY_MUL
+          : 1;
+      const didHit = rollAccuracy(distXZ(from, hit), maxRange, accuracyMul);
       const impactAt = didHit ? hit : scatterAim(from, hit);
 
       if (isTankShell) {
         // Misses still detonate as splash AOE (no guaranteed primary hit)
-        spawnExplosion(scene, impactAt, { scale: 1.15, duration: 0.55 });
+        const splash =
+          techLevels[unit.team].tankSplash > 0
+            ? TANK_SPLASH_RADIUS * TANK_SPLASH_MUL
+            : TANK_SPLASH_RADIUS;
+        const heavy = splash > TANK_SPLASH_RADIUS;
+        spawnExplosion(scene, impactAt, {
+          scale: heavy ? 1.85 : 1.15,
+          duration: 0.55,
+        });
         applyArealHit(
           impactAt,
           didHit ? target : null,
           damage,
-          TANK_SPLASH_RADIUS,
+          splash,
           unit.team,
           {
             impactFromX: from.x,
             impactFromZ: from.z,
-            impactStrength: 8.5,
+            impactStrength: heavy ? 14 : 8.5,
           },
         );
         return;
@@ -546,6 +725,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   }
 
   function wireTurretCombat(turret: TurretHandle): void {
+    const rawTakeDamage = turret.takeDamage.bind(turret);
+    turret.takeDamage = (amount) => {
+      if (amount > 0) turretLastHurt.set(turret, elapsed);
+      rawTakeDamage(amount);
+    };
     turret.setOnFire(() => {
       const target = findTurretFocus(turret);
       if (!target || target.destroyed) return;
@@ -623,6 +807,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   function spawnFrom(slot: Slot): void {
     const b = slot.building;
     if (!b || b.destroyed) return;
+    if (!b.spawns) return;
 
     const kind = b.spawns;
     const towardEnemy = b.team === "blue" ? 1 : -1;
@@ -641,9 +826,18 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.root.scaling.setAll(0.8);
     unit.fireRateHz = UNIT_STATS[kind].fireRateHz;
 
+    if (kind === "tank" && techLevels[b.team].tankHp > 0) {
+      unit.applyMaxHpBonus(TANK_HP_MUL);
+    }
+    if (kind === "helicopter" && techLevels[b.team].heliMissiles > 0) {
+      unit.setMissilesEnabled(true);
+    }
+
     const hpBar = createHpBar(scene, unit.root.name);
     hpBar.setRatio(1);
 
+    const supplyRate =
+      1 + SUPPLY_SPEED_BONUS_PER_LEVEL * techLevels[b.team].supplySpeed;
     const advanceZ = towardEnemy * (buildingZ - 3.5);
     const agent: Agent = {
       unit,
@@ -656,7 +850,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       stuckTimer: 0,
       lastX: spawnX,
       lastZ: spawnZ,
-      coinCooldown: SUPPLY_TRUCK_COIN_INTERVAL_SEC * (0.4 + Math.random() * 0.6),
+      coinCooldown:
+        (SUPPLY_TRUCK_COIN_INTERVAL_SEC / supplyRate) *
+        (0.4 + Math.random() * 0.6),
     };
     agents.push(agent);
     wireUnitCombat(unit);
@@ -671,9 +867,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   function engageRange(attacker: UnitHandle, target: CombatEntity): number {
     if (attacker.kind === "helicopter") {
-      const isTank =
-        "kind" in target && (target as UnitHandle).kind === "tank";
-      return isTank ? attacker.shootRange : HELI_GUN_RANGE;
+      const useMissile =
+        techLevels[attacker.team].heliMissiles > 0 &&
+        "kind" in target &&
+        ((target as UnitHandle).kind === "tank" ||
+          (target as UnitHandle).kind === "supplyTruck");
+      return useMissile ? attacker.shootRange : HELI_GUN_RANGE;
     }
     return attacker.shootRange;
   }
@@ -722,6 +921,15 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     }
     return best;
+  }
+
+  /** True when an enemy unit has this turret locked as its combat focus. */
+  function isEnemyTargetingTurret(turret: TurretHandle): boolean {
+    for (const agent of agents) {
+      if (agent.unit.destroyed || agent.unit.team === turret.team) continue;
+      if (agent.focus === turret) return true;
+    }
+    return false;
   }
 
   function findBuildingInRange(unit: UnitHandle): CombatEntity | null {
@@ -1055,7 +1263,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (unit.kind === "supplyTruck") {
       agent.coinCooldown -= dt;
       if (agent.coinCooldown <= 0) {
-        agent.coinCooldown = SUPPLY_TRUCK_COIN_INTERVAL_SEC;
+        const supplyRate =
+          1 + SUPPLY_SPEED_BONUS_PER_LEVEL * techLevels[unit.team].supplySpeed;
+        agent.coinCooldown = SUPPLY_TRUCK_COIN_INTERVAL_SEC / supplyRate;
         addCoins(unit.team, SUPPLY_TRUCK_COIN_AMOUNT, {
           world: unit.root.position.clone(),
           popup: true,
@@ -1221,8 +1431,19 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       enemy.supplyTruck * 1.5 + enemyBuildings.depot * 2;
 
     // Bootstrap: get something on the field
-    if (own.barracks + own.factory + own.helipad + own.depot === 0) {
+    if (own.barracks + own.factory + own.helipad + own.depot + own.researchLab === 0) {
       return "barracks";
+    }
+
+    // Tech mid-game: one lab once we have a foothold
+    if (
+      own.researchLab === 0 &&
+      own.barracks + own.factory + own.helipad >= 2 &&
+      coins[AI_TEAM] >= BUILDING_COST.researchLab
+    ) {
+      if (Math.random() < 0.4 || enemyBuildings.researchLab > 0) {
+        return "researchLab";
+      }
     }
 
     // Economy answer if player is farming hard and we have few depots
@@ -1265,7 +1486,13 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
     // Avoid stacking too many of the same if we can afford a different answer
     if (own[counter] >= 3) {
-      const alts: BuildingKind[] = ["barracks", "factory", "helipad", "depot"];
+      const alts: BuildingKind[] = [
+        "barracks",
+        "factory",
+        "helipad",
+        "depot",
+        "researchLab",
+      ];
       const cheaper = alts
         .filter((k) => k !== counter && coins[AI_TEAM] >= BUILDING_COST[k])
         .sort((a, b) => BUILDING_COST[a] - BUILDING_COST[b]);
@@ -1275,8 +1502,46 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return counter;
   }
 
+  /** AI picks a useful unfinished upgrade when a lab is idle. */
+  function aiPickUpgrade(): UpgradeId | null {
+    if (activeResearch[AI_TEAM] || !teamHasLab(AI_TEAM)) return null;
+    const levels = techLevels[AI_TEAM];
+    const own = countBuildingsByKind(AI_TEAM);
+    const ownUnits = countUnitsByKind(AI_TEAM);
+    const enemy = countUnitsByKind(PLAYER_TEAM);
+
+    const candidates: { id: UpgradeId; score: number }[] = [];
+    for (const id of UPGRADE_IDS) {
+      const def = UPGRADE_DEFS[id];
+      if (levels[id] >= def.maxLevel) continue;
+      const cost = upgradeCost(def, levels[id]);
+      if (coins[AI_TEAM] < cost) continue;
+
+      let score = 1;
+      if (id === "supplySpeed" && own.depot > 0) score = 3 + levels.supplySpeed;
+      if (id === "infantryAccuracy" && own.barracks > 0) score = 2.5;
+      if (id === "infantryProd" && own.barracks > 0) score = 2.8;
+      if (id === "tankHp" && (own.factory > 0 || ownUnits.tank > 0)) score = 3;
+      if (id === "tankSplash" && own.factory > 0) score = 2.6;
+      if (id === "heliMissiles" && (own.helipad > 0 || enemy.tank > 2)) score = 3.5;
+      if (id === "turretRange") score = 2.2;
+      if (id === "turretRegen") score = 2;
+      candidates.push({ id, score: score + Math.random() * 0.4 });
+    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].id;
+  }
+
   function runAiDecision(): void {
     if (gameOver) return;
+
+    // Prefer finishing tech when a lab is free and coins allow
+    const upgrade = aiPickUpgrade();
+    if (upgrade) {
+      beginResearch(AI_TEAM, upgrade);
+      return;
+    }
 
     const empty = slots.filter((s) => s.team === AI_TEAM && !s.building);
     const kind = aiPickBuildKind();
@@ -1305,9 +1570,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       const score = (s: Slot) =>
         s.building!.kind === "depot" && own.depot > 1
           ? 0
-          : s.building!.kind === kind
-            ? 2
-            : 1;
+          : s.building!.kind === "researchLab" && own.researchLab > 1
+            ? 0
+            : s.building!.kind === kind
+              ? 2
+              : 1;
       return score(a) - score(b);
     });
     collapseBuilding(unwanted[0]);
@@ -1342,24 +1609,32 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
     const occupied =
       slot.building && !slot.building.destroyed ? slot.building.kind : null;
+    researchModalOpen = occupied === "researchLab";
 
     hud.openBuildModal({
       coins: coins[PLAYER_TEAM],
       occupied,
       canCollapse: occupied !== null && livingBuildings(PLAYER_TEAM).length > 1,
+      upgrades: researchModalOpen ? getUpgradeCards(PLAYER_TEAM) : undefined,
       onBuild: (kind) => {
         placeBuilding(slot, kind);
         slot.platform.setHighlight(false);
         selectedSlot = null;
+        researchModalOpen = false;
+      },
+      onResearch: (id) => {
+        beginResearch(PLAYER_TEAM, id);
       },
       onCollapse: () => {
         collapseBuilding(slot);
         slot.platform.setHighlight(false);
         selectedSlot = null;
+        researchModalOpen = false;
       },
       onClose: () => {
         slot.platform.setHighlight(false);
         selectedSlot = null;
+        researchModalOpen = false;
       },
     });
   }
@@ -1401,7 +1676,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     anyUnitDestroyed = true;
   }
 
-  function updateTurret(turret: TurretHandle, hpBar: HpBarHandle): void {
+  function updateTurret(turret: TurretHandle, hpBar: HpBarHandle, dt: number): void {
     if (turret.destroyed) {
       turret.setAimTarget(null);
       turretAim.set(turret, null);
@@ -1410,13 +1685,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       if (turret.lastAttackerTeam) awardTurretBounty(turret);
       return;
     }
-
-    hpBar.setRatio(turret.hp / turret.maxHp);
-    hpBar.update(
-      turret.root.getAbsolutePosition(),
-      TURRET_HP_BAR_HEIGHT,
-      camera.globalPosition,
-    );
 
     let focus = turretAim.get(turret) ?? null;
     if (focus?.destroyed) focus = null;
@@ -1427,6 +1695,25 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (!focus) focus = acquireTurretTarget(turret);
     turretAim.set(turret, focus);
     turret.setAimTarget(focus);
+
+    // Auto-Repair Nanites: heal when no enemy is targeting this turret
+    if (
+      techLevels[turret.team].turretRegen > 0 &&
+      turret.hp < turret.maxHp &&
+      !isEnemyTargetingTurret(turret)
+    ) {
+      const lastHurt = turretLastHurt.get(turret) ?? -999;
+      if (elapsed - lastHurt >= TURRET_REGEN_DELAY_SEC) {
+        turret.heal(TURRET_REGEN_HP_PER_SEC * dt);
+      }
+    }
+
+    hpBar.setRatio(turret.hp / turret.maxHp);
+    hpBar.update(
+      turret.root.getAbsolutePosition(),
+      TURRET_HP_BAR_HEIGHT,
+      camera.globalPosition,
+    );
   }
 
   let elapsed = 0;
@@ -1477,6 +1764,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         aiCooldown = AI_DECISION_INTERVAL_SEC;
         runAiDecision();
       }
+
+      tickResearch(PLAYER_TEAM, dt);
+      tickResearch(AI_TEAM, dt);
     }
 
     captureFlag.update(dt, elapsed);
@@ -1504,10 +1794,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         );
       }
       if (gameOver) continue;
+      if (b.kind === "researchLab") continue;
       slot.spawnCooldown -= dt;
       if (slot.spawnCooldown <= 0) {
         spawnFrom(slot);
-        slot.spawnCooldown = spawnIntervalFor(b.kind);
+        slot.spawnCooldown = spawnIntervalFor(
+          b.kind,
+          techLevels[b.team].infantryProd > 0,
+        );
       }
     }
 
@@ -1550,7 +1844,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     } else {
       for (let i = 0; i < turrets.length; i++) {
-        updateTurret(turrets[i], turretHpBars[i]);
+        updateTurret(turrets[i], turretHpBars[i], dt);
         turrets[i].update(dt, elapsed);
       }
 

@@ -130,6 +130,7 @@ export const BUILDING_COST: Record<BuildingKind, number> = {
   barracks: 50,
   depot: 75,
   factory: 120,
+  researchLab: 100,
   helipad: 180,
 };
 
@@ -137,6 +138,7 @@ export const BUILDING_LABEL: Record<BuildingKind, string> = {
   barracks: "Barracks",
   depot: "Supply Depot",
   factory: "Factory",
+  researchLab: "Research Lab",
   helipad: "Helipad",
 };
 
@@ -151,10 +153,12 @@ export const BUILDING_BLURB: Record<BuildingKind, string> = {
   barracks: "Fast infantry. Strong vs helicopters.",
   depot: "Spawns supply trucks that mint coins.",
   factory: "Heavy armor. Strong vs infantry.",
+  researchLab: "Unlock unit upgrades. Does not spawn units.",
   helipad: "Air support. Strong vs tanks.",
 };
 
-export const BUILDING_TO_UNIT: Record<BuildingKind, UnitKind> = {
+/** Production buildings only — Research Lab has no unit. */
+export const BUILDING_TO_UNIT: Partial<Record<BuildingKind, UnitKind>> = {
   barracks: "rifleman",
   depot: "supplyTruck",
   factory: "tank",
@@ -179,5 +183,6 @@ export const BUILDING_KINDS: BuildingKind[] = [
   "barracks",
   "depot",
   "factory",
+  "researchLab",
   "helipad",
 ];

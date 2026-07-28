@@ -7,15 +7,36 @@ import {
   BUILDING_TO_UNIT,
   UNIT_LABEL,
 } from "../game/stats";
+import {
+  UPGRADE_DEFS,
+  UPGRADE_IDS,
+  upgradeCost,
+  type UpgradeId,
+} from "../game/upgrades";
+
+export interface UpgradeCardState {
+  id: UpgradeId;
+  level: number;
+  maxLevel: number;
+  cost: number;
+  /** 0–1 when this upgrade is the active research project. */
+  progress: number | null;
+  researching: boolean;
+  /** Another project is already running. */
+  blocked: boolean;
+}
 
 export interface BuildModalOpts {
   coins: number;
-  /** When set, platform already has a building — show collapse. */
+  /** When set, platform already has a building — show collapse / research. */
   occupied: BuildingKind | null;
   canCollapse: boolean;
   onBuild: (kind: BuildingKind) => void;
   onCollapse: () => void;
   onClose: () => void;
+  /** Research Lab only — current upgrade board. */
+  upgrades?: UpgradeCardState[];
+  onResearch?: (id: UpgradeId) => void;
 }
 
 export interface HudHandle {
@@ -25,13 +46,20 @@ export interface HudHandle {
   openBuildModal: (opts: BuildModalOpts) => void;
   /** Refresh build-card affordability while the modal stays open. */
   refreshBuildAfford: (coins: number) => void;
+  /** Refresh research cards (progress / levels / afford) while lab modal is open. */
+  refreshResearchModal: (
+    coins: number,
+    upgrades: UpgradeCardState[],
+  ) => void;
   closeModal: () => void;
+  /** Juicy toast when an upgrade finishes. */
+  showUpgradeToast: (label: string) => void;
   showEndScreen: (result: "victory" | "defeat") => void;
   dispose: () => void;
 }
 
 /**
- * DOM HUD: coin counter, build/collapse modal, victory / defeat overlay.
+ * DOM HUD: coin counter, build/collapse/research modal, victory / defeat overlay.
  */
 export function createHud(): HudHandle {
   const root = document.getElementById("hud");
@@ -45,7 +73,7 @@ export function createHud(): HudHandle {
   top.innerHTML = `
     <div class="hud-brand">
       <h1>Auto Battler</h1>
-      <p>Tap your platforms to build · Collapse to rebuild</p>
+      <p>Tap your platforms to build · Research Lab unlocks upgrades</p>
     </div>
     <div class="hud-coins" id="hudCoins" aria-live="polite">
       <span class="coin-icon" aria-hidden="true"></span>
@@ -53,6 +81,12 @@ export function createHud(): HudHandle {
     </div>
   `;
   root.appendChild(top);
+
+  const toastHost = document.createElement("div");
+  toastHost.id = "upgradeToastHost";
+  toastHost.className = "upgrade-toast-host";
+  toastHost.setAttribute("aria-live", "polite");
+  document.body.appendChild(toastHost);
 
   const modalHost = document.createElement("div");
   modalHost.id = "buildModalHost";
@@ -75,12 +109,17 @@ export function createHud(): HudHandle {
   let pulseDir: "up" | "down" | null = null;
   let modalCoins = 0;
   let buildCards: HTMLButtonElement[] = [];
+  let researchCards: HTMLButtonElement[] = [];
+  let modalMode: "build" | "site" | "research" | null = null;
+  let toastTimer = 0;
 
   function closeModal(): void {
     modalHost.hidden = true;
     modalHost.innerHTML = "";
     modalHost.onclick = null;
     buildCards = [];
+    researchCards = [];
+    modalMode = null;
   }
 
   function paintCoins(): void {
@@ -94,6 +133,82 @@ export function createHud(): HudHandle {
     for (const card of buildCards) {
       const cost = Number(card.dataset.cost ?? 0);
       card.disabled = coins < cost;
+    }
+  }
+
+  function paintUpgradeCard(card: HTMLButtonElement, u: UpgradeCardState): void {
+    const def = UPGRADE_DEFS[u.id];
+    const done = u.level >= u.maxLevel;
+    const levelTag =
+      u.maxLevel > 1 ? ` · ${u.level}/${u.maxLevel}` : u.level > 0 ? " · Done" : "";
+
+    let status = "";
+    if (u.researching && u.progress !== null) {
+      status = `<div class="upgrade-progress"><span style="width:${Math.round(u.progress * 100)}%"></span></div>
+        <div class="upgrade-status">Researching… ${Math.round(u.progress * 100)}%</div>`;
+    } else if (done) {
+      status = `<div class="upgrade-status upgrade-status--done">Unlocked</div>`;
+    } else if (u.blocked) {
+      status = `<div class="upgrade-status">Queue busy</div>`;
+    }
+
+    card.dataset.cost = String(u.cost);
+    card.dataset.id = u.id;
+    card.className = `build-card upgrade-card${done ? " upgrade-card--done" : ""}${
+      u.researching ? " upgrade-card--active" : ""
+    }`;
+    card.disabled =
+      done || u.researching || u.blocked || modalCoins < u.cost;
+    card.innerHTML = `
+      <div class="build-card-head">
+        <span class="build-name">${def.label}${levelTag}</span>
+        <span class="build-cost">${done ? "—" : u.cost}</span>
+      </div>
+      <div class="build-blurb">${def.blurb}</div>
+      <div class="upgrade-meta">${def.durationSec}s research</div>
+      ${status}
+    `;
+  }
+
+  function patchUpgradeCard(card: HTMLButtonElement, u: UpgradeCardState): void {
+    const done = u.level >= u.maxLevel;
+    card.dataset.cost = String(u.cost);
+    card.disabled =
+      done || u.researching || u.blocked || modalCoins < u.cost;
+    card.classList.toggle("upgrade-card--done", done);
+    card.classList.toggle("upgrade-card--active", u.researching);
+
+    const bar = card.querySelector(".upgrade-progress > span") as HTMLElement | null;
+    const status = card.querySelector(".upgrade-status") as HTMLElement | null;
+    if (u.researching && u.progress !== null) {
+      if (bar) {
+        bar.style.width = `${Math.round(u.progress * 100)}%`;
+      } else {
+        paintUpgradeCard(card, u);
+        return;
+      }
+      if (status) {
+        status.textContent = `Researching… ${Math.round(u.progress * 100)}%`;
+        status.classList.remove("upgrade-status--done");
+      }
+    } else if (!u.researching && card.classList.contains("upgrade-card--active")) {
+      // Research just finished / switched — full repaint for level tags
+      paintUpgradeCard(card, u);
+    } else {
+      // Affordability / blocked-only updates
+      card.disabled =
+        done || u.researching || u.blocked || modalCoins < u.cost;
+    }
+  }
+
+  function applyResearchState(coins: number, upgrades: UpgradeCardState[]): void {
+    modalCoins = coins;
+    const byId = new Map(upgrades.map((u) => [u.id, u]));
+    for (const card of researchCards) {
+      const id = card.dataset.id as UpgradeId | undefined;
+      if (!id) continue;
+      const u = byId.get(id);
+      if (u) patchUpgradeCard(card, u);
     }
   }
 
@@ -114,7 +229,7 @@ export function createHud(): HudHandle {
         }
       }
       targetCoins = next;
-      if (!modalHost.hidden) applyBuildAfford(next);
+      if (!modalHost.hidden && modalMode === "build") applyBuildAfford(next);
     },
     update: (dt) => {
       const diff = targetCoins - displayCoins;
@@ -134,6 +249,14 @@ export function createHud(): HudHandle {
           pulseDir = null;
         }
       }
+
+      if (toastTimer > 0) {
+        toastTimer -= dt;
+        if (toastTimer <= 0) {
+          toastHost.classList.remove("upgrade-toast-host--show");
+          toastHost.innerHTML = "";
+        }
+      }
     },
     openBuildModal: (opts) => {
       closeModal();
@@ -144,16 +267,77 @@ export function createHud(): HudHandle {
       panel.className = "modal-panel";
       panel.setAttribute("role", "dialog");
       panel.setAttribute("aria-modal", "true");
-      panel.setAttribute("aria-label", "Build menu");
+
+      const isLab = opts.occupied === "researchLab";
+      panel.setAttribute(
+        "aria-label",
+        isLab ? "Research lab" : opts.occupied ? "Site occupied" : "Build menu",
+      );
 
       const title = document.createElement("h2");
-      title.textContent = opts.occupied ? "Site occupied" : "Build on site";
+      title.textContent = isLab
+        ? "Research Lab"
+        : opts.occupied
+          ? "Site occupied"
+          : "Build on site";
       panel.appendChild(title);
 
-      if (opts.occupied) {
+      if (isLab && opts.upgrades && opts.onResearch) {
+        modalMode = "research";
+
         const info = document.createElement("p");
         info.className = "modal-sub";
-        info.textContent = `${BUILDING_LABEL[opts.occupied]} · produces ${UNIT_LABEL[BUILDING_TO_UNIT[opts.occupied]]}`;
+        info.textContent = "Pick an upgrade — one project at a time.";
+        panel.appendChild(info);
+
+        const list = document.createElement("div");
+        list.className = "build-list";
+        researchCards = [];
+
+        for (const id of UPGRADE_IDS) {
+          const u =
+            opts.upgrades.find((x) => x.id === id) ??
+            ({
+              id,
+              level: 0,
+              maxLevel: UPGRADE_DEFS[id].maxLevel,
+              cost: upgradeCost(UPGRADE_DEFS[id], 0),
+              progress: null,
+              researching: false,
+              blocked: false,
+            } satisfies UpgradeCardState);
+          const card = document.createElement("button");
+          card.type = "button";
+          paintUpgradeCard(card, u);
+          card.addEventListener("click", () => {
+            if (card.disabled) return;
+            opts.onResearch?.(id);
+          });
+          list.appendChild(card);
+          researchCards.push(card);
+        }
+        panel.appendChild(list);
+
+        const collapseBtn = document.createElement("button");
+        collapseBtn.type = "button";
+        collapseBtn.className = "btn btn-danger";
+        collapseBtn.textContent = opts.canCollapse
+          ? "Collapse building"
+          : "Can't collapse last building";
+        collapseBtn.disabled = !opts.canCollapse;
+        collapseBtn.addEventListener("click", () => {
+          closeModal();
+          opts.onCollapse();
+        });
+        panel.appendChild(collapseBtn);
+      } else if (opts.occupied) {
+        modalMode = "site";
+        const unit = BUILDING_TO_UNIT[opts.occupied];
+        const info = document.createElement("p");
+        info.className = "modal-sub";
+        info.textContent = unit
+          ? `${BUILDING_LABEL[opts.occupied]} · produces ${UNIT_LABEL[unit]}`
+          : BUILDING_LABEL[opts.occupied];
         panel.appendChild(info);
 
         const collapseBtn = document.createElement("button");
@@ -169,12 +353,14 @@ export function createHud(): HudHandle {
         });
         panel.appendChild(collapseBtn);
       } else {
+        modalMode = "build";
         const list = document.createElement("div");
         list.className = "build-list";
         buildCards = [];
 
         for (const kind of BUILDING_KINDS) {
           const cost = BUILDING_COST[kind];
+          const unit = BUILDING_TO_UNIT[kind];
           const card = document.createElement("button");
           card.type = "button";
           card.className = `build-card build-card--${kind}`;
@@ -185,7 +371,9 @@ export function createHud(): HudHandle {
               <span class="build-name">${BUILDING_LABEL[kind]}</span>
               <span class="build-cost">${cost}</span>
             </div>
-            <div class="build-unit">Produces ${UNIT_LABEL[BUILDING_TO_UNIT[kind]]}</div>
+            <div class="build-unit">${
+              unit ? `Produces ${UNIT_LABEL[unit]}` : "Unlocks upgrades"
+            }</div>
             <div class="build-blurb">${BUILDING_BLURB[kind]}</div>
           `;
           card.addEventListener("click", () => {
@@ -218,10 +406,21 @@ export function createHud(): HudHandle {
       };
     },
     refreshBuildAfford: (coins) => {
-      if (modalHost.hidden) return;
+      if (modalHost.hidden || modalMode !== "build") return;
       applyBuildAfford(coins);
     },
+    refreshResearchModal: (coins, upgrades) => {
+      if (modalHost.hidden || modalMode !== "research") return;
+      applyResearchState(coins, upgrades);
+    },
     closeModal,
+    showUpgradeToast: (label) => {
+      toastHost.innerHTML = `<div class="upgrade-toast"><span class="upgrade-toast-icon" aria-hidden="true"></span><strong>Upgrade complete</strong><span>${label}</span></div>`;
+      toastHost.classList.remove("upgrade-toast-host--show");
+      void toastHost.offsetWidth;
+      toastHost.classList.add("upgrade-toast-host--show");
+      toastTimer = 2.8;
+    },
     showEndScreen: (result) => {
       closeModal();
       endHost.hidden = false;
@@ -244,6 +443,7 @@ export function createHud(): HudHandle {
       closeModal();
       modalHost.remove();
       endHost.remove();
+      toastHost.remove();
       root.innerHTML = "";
     },
   };

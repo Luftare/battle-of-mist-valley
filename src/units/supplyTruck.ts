@@ -190,6 +190,12 @@ export function createSupplyTruck(
     get maxHp() {
       return combatState.maxHp;
     },
+    applyMaxHpBonus: (factor) => {
+      combatState.applyMaxHpBonus(factor);
+    },
+    setMissilesEnabled: () => {
+      /* supply truck — no missiles */
+    },
     get shootRange() {
       return 0;
     },

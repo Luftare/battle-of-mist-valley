@@ -26,13 +26,17 @@ const MISSILE_SPEED = HELI_MOVE_SPEED * 4;
 const HELI_MISSILE_HZ = 0.2; // once every 5 seconds
 const CRUISE_Y = 2.7;
 
-function isTankTarget(target: CombatEntity): boolean {
-  return "kind" in target && (target as UnitHandle).kind === "tank";
+/** Vehicles that can be hit by unlocked Hellfire missiles. */
+function isVehicleTarget(target: CombatEntity): boolean {
+  if (!("kind" in target)) return false;
+  const kind = (target as UnitHandle).kind;
+  return kind === "tank" || kind === "supplyTruck";
 }
 
 /**
  * Blocky helicopter with spinning rotors, hover bob, chin gun, and guided missiles.
- * Combat: missiles vs tanks; chin gun vs helicopters / infantry / buildings.
+ * Combat: chin gun by default; missiles unlock via Research Lab (Hellfire Protocol)
+ * and then engage all vehicles (tanks + supply trucks).
  * Destroy: main rotor flies off, tail boom snaps away, fuselage drops.
  */
 export function createHelicopter(
@@ -176,6 +180,7 @@ export function createHelicopter(
   let tailSpin = phase * 1.3;
   let combat = false;
   let moving = false;
+  let missilesEnabled = false;
   let fireCooldown = 0;
   let fireRateHz = HELI_MISSILE_HZ;
   let nextPod = 0;
@@ -262,6 +267,12 @@ export function createHelicopter(
     },
     get maxHp() {
       return combatState.maxHp;
+    },
+    applyMaxHpBonus: (factor) => {
+      combatState.applyMaxHpBonus(factor);
+    },
+    setMissilesEnabled: (enabled) => {
+      missilesEnabled = enabled;
     },
     get shootRange() {
       return combatState.shootRange;
@@ -454,7 +465,7 @@ export function createHelicopter(
       tailRotor.rotation.x = tailSpin;
 
       if (combat && aimTarget && !aimTarget.destroyed) {
-        const useMissile = isTankTarget(aimTarget);
+        const useMissile = missilesEnabled && isVehicleTarget(aimTarget);
         fireCooldown -= dt;
         if (fireCooldown <= 0) {
           if (useMissile) {

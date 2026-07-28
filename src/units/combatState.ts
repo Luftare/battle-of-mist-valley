@@ -17,6 +17,8 @@ export interface UnitCombatState {
   beginDeath: () => void;
   updateCorpse: (dt: number, root: TransformNode) => void;
   takeDamage: (amount: number, onKill: () => void) => void;
+  /** Scale max and current HP (research armor upgrades). */
+  applyMaxHpBonus: (factor: number) => void;
 }
 
 export function createUnitCombatState(kind: UnitKind): UnitCombatState {
@@ -57,6 +59,11 @@ export function createUnitCombatState(kind: UnitKind): UnitCombatState {
       if (state.destroyed || amount <= 0) return;
       state.hp = Math.max(0, state.hp - amount);
       if (state.hp <= 0) onKill();
+    },
+    applyMaxHpBonus: (factor) => {
+      if (state.destroyed || factor <= 0) return;
+      state.maxHp *= factor;
+      state.hp *= factor;
     },
   };
 
