@@ -72,9 +72,9 @@ export const ACCURACY_AT_MAX_RANGE = 0.5;
 /** How far a miss lands from the aim point (world units). */
 export const MISS_SCATTER_RADIUS = 1.85;
 
-/** Fixed map turrets: tank range, rifle cadence, 1.25× rifle damage, 2× tank HP. */
+/** Fixed map turrets: tank range, 2× rifle cadence, fixed damage, 2× tank HP. */
 export const TURRET_SHOOT_RANGE = UNIT_STATS.tank.shootRange * 1.25;
-export const TURRET_FIRE_HZ = UNIT_STATS.rifleman.fireRateHz;
+export const TURRET_FIRE_HZ = UNIT_STATS.rifleman.fireRateHz * 2;
 export const TURRET_DAMAGE = 10;
 export const TURRET_MAX_HP = UNIT_STATS.tank.maxHp * 2;
 export const TURRET_BOUNTY = 25;

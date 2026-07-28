@@ -58,6 +58,7 @@ import {
   TURRET_SHOOT_RANGE,
   type UnitKind,
 } from "./stats";
+import { createAiBrain, type AiSlotView, type AiSnapshot } from "./aiStrategy";
 import {
   createTeamTechLevels,
   INFANTRY_ACCURACY_MUL,
@@ -313,7 +314,12 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   let anyBuildingDestroyed = false;
   let gameOver = false;
-  let aiCooldown = AI_DECISION_INTERVAL_SEC * 0.4;
+  let elapsed = 0;
+  let aiCooldown = AI_DECISION_INTERVAL_SEC * (0.25 + Math.random() * 0.35);
+  const aiBrain = createAiBrain();
+  if (typeof console !== "undefined") {
+    console.info(`[AI] Strategy: ${aiBrain.label}`);
+  }
   let flagCoinCooldown = 0;
   let selectedSlot: Slot | null = null;
 
@@ -394,23 +400,6 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return slots
       .filter((s) => s.team === team && s.building && !s.building.destroyed)
       .map((s) => s.building!);
-  }
-
-  function livingUnits(team: Team): UnitHandle[] {
-    return agents.filter((a) => a.unit.team === team && !a.unit.destroyed).map((a) => a.unit);
-  }
-
-  function countUnitsByKind(team: Team): Record<UnitKind, number> {
-    const counts: Record<UnitKind, number> = {
-      rifleman: 0,
-      tank: 0,
-      helicopter: 0,
-      supplyTruck: 0,
-    };
-    for (const u of livingUnits(team)) {
-      counts[u.kind as UnitKind] = (counts[u.kind as UnitKind] ?? 0) + 1;
-    }
-    return counts;
   }
 
   function countBuildingsByKind(team: Team): Record<BuildingKind, number> {
@@ -1440,166 +1429,80 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     }
   }
 
-  /** Pick a counter building vs the player's current army / economy. */
-  function aiPickBuildKind(): BuildingKind {
-    const enemy = countUnitsByKind(PLAYER_TEAM);
-    const enemyBuildings = countBuildingsByKind(PLAYER_TEAM);
-    const own = countBuildingsByKind(AI_TEAM);
-
-    const combatPressure =
-      enemy.rifleman * 1 + enemy.tank * 2.2 + enemy.helicopter * 1.6;
-    const economyPressure =
-      enemy.supplyTruck * 1.5 + enemyBuildings.depot * 2;
-
-    // Bootstrap: get something on the field
-    if (own.barracks + own.factory + own.helipad + own.depot + own.researchLab === 0) {
-      return "barracks";
-    }
-
-    // Tech mid-game: one lab once we have a foothold
-    if (
-      own.researchLab === 0 &&
-      own.barracks + own.factory + own.helipad >= 2 &&
-      coins[AI_TEAM] >= BUILDING_COST.researchLab
-    ) {
-      if (Math.random() < 0.4 || enemyBuildings.researchLab > 0) {
-        return "researchLab";
+  function buildAiSnapshot(): AiSnapshot {
+    const empty: AiSlotView[] = [];
+    const occupied: AiSlotView[] = [];
+    for (const slot of slots) {
+      if (slot.team !== AI_TEAM) continue;
+      const b = slot.building;
+      // Pad is free only when empty or fully expired
+      if (!b || b.expired) {
+        empty.push({ index: slot.index, x: slot.x, kind: null, canCollapse: false });
+        continue;
       }
+      // Destroyed / collapsing wreck still occupies the pad
+      if (b.destroyed || b.collapsing) continue;
+      occupied.push({
+        index: slot.index,
+        x: slot.x,
+        kind: b.kind,
+        canCollapse: true,
+      });
     }
-
-    // Economy answer if player is farming hard and we have few depots
-    if (economyPressure > 3 && own.depot < 2 && coins[AI_TEAM] >= BUILDING_COST.depot) {
-      return "depot";
-    }
-
-    // Soft open: second building often a depot for late pressure
-    const combatBuildings = own.barracks + own.factory + own.helipad;
-    if (combatBuildings >= 1 && own.depot === 0 && coins[AI_TEAM] >= BUILDING_COST.depot) {
-      if (Math.random() < 0.45) return "depot";
-    }
-
-    // Counter the dominant combat unit the player fields (or is building)
-    const scores: Record<"rifleman" | "tank" | "helicopter", number> = {
-      rifleman: enemy.rifleman + enemyBuildings.barracks * 1.5,
-      tank: enemy.tank + enemyBuildings.factory * 1.5,
-      helicopter: enemy.helicopter + enemyBuildings.helipad * 1.5,
+    return {
+      coins: coins[AI_TEAM],
+      counts: countBuildingsByKind(AI_TEAM),
+      empty,
+      occupied,
+      researching: activeResearch[AI_TEAM] !== null,
+      tech: { ...techLevels[AI_TEAM] },
+      elapsed,
     };
-    let dominant: "rifleman" | "tank" | "helicopter" = "rifleman";
-    let best = -1;
-    for (const k of ["rifleman", "tank", "helicopter"] as const) {
-      if (scores[k] > best) {
-        best = scores[k];
-        dominant = k;
-      }
-    }
-
-    let counter: BuildingKind =
-      dominant === "helicopter"
-        ? "barracks"
-        : dominant === "tank"
-          ? "helipad"
-          : "factory";
-
-    // If no real pressure yet, diversify toward barracks / factory
-    if (combatPressure < 1 && best < 1) {
-      counter = own.barracks <= own.factory ? "barracks" : "factory";
-    }
-
-    // Avoid stacking too many of the same if we can afford a different answer
-    if (own[counter] >= 3) {
-      const alts: BuildingKind[] = [
-        "barracks",
-        "factory",
-        "helipad",
-        "depot",
-        "researchLab",
-      ];
-      const cheaper = alts
-        .filter((k) => k !== counter && coins[AI_TEAM] >= BUILDING_COST[k])
-        .sort((a, b) => BUILDING_COST[a] - BUILDING_COST[b]);
-      if (cheaper.length) counter = cheaper[0];
-    }
-
-    return counter;
   }
 
-  /** AI picks a useful unfinished upgrade when a lab is idle. */
-  function aiPickUpgrade(): UpgradeId | null {
-    if (activeResearch[AI_TEAM] || !teamHasLab(AI_TEAM)) return null;
-    const levels = techLevels[AI_TEAM];
-    const own = countBuildingsByKind(AI_TEAM);
-    const ownUnits = countUnitsByKind(AI_TEAM);
-    const enemy = countUnitsByKind(PLAYER_TEAM);
-
-    const candidates: { id: UpgradeId; score: number }[] = [];
-    for (const id of UPGRADE_IDS) {
-      const def = UPGRADE_DEFS[id];
-      if (levels[id] >= def.maxLevel) continue;
-      const cost = upgradeCost(def, levels[id]);
-      if (coins[AI_TEAM] < cost) continue;
-
-      let score = 1;
-      if (id === "supplySpeed" && own.depot > 0) score = 3 + levels.supplySpeed;
-      if (id === "infantryAccuracy" && own.barracks > 0) score = 2.5;
-      if (id === "infantryProd" && own.barracks > 0) score = 2.8;
-      if (id === "tankHp" && (own.factory > 0 || ownUnits.tank > 0)) score = 3;
-      if (id === "tankSplash" && own.factory > 0) score = 2.6;
-      if (id === "tankFireRate" && (own.factory > 0 || ownUnits.tank > 0)) score = 2.9;
-      if (id === "heliMissiles" && (own.helipad > 0 || enemy.tank > 2)) score = 3.5;
-      if (id === "turretRange") score = 2.2;
-      if (id === "turretRegen") score = 2;
-      candidates.push({ id, score: score + Math.random() * 0.4 });
-    }
-    if (!candidates.length) return null;
-    candidates.sort((a, b) => b.score - a.score);
-    return candidates[0].id;
+  function nextAiCooldown(): number {
+    // Think faster when sitting on unspent coins or open pads
+    const rich = coins[AI_TEAM] >= 120;
+    const openPads = slots.some(
+      (s) => s.team === AI_TEAM && (!s.building || s.building.expired),
+    );
+    const base = rich && openPads ? 4.5 : rich ? 6 : AI_DECISION_INTERVAL_SEC;
+    return base * (0.75 + Math.random() * 0.5);
   }
 
   function runAiDecision(): void {
     if (gameOver) return;
 
-    // Prefer finishing tech when a lab is free and coins allow
-    const upgrade = aiPickUpgrade();
-    if (upgrade) {
-      beginResearch(AI_TEAM, upgrade);
-      return;
+    // Spend aggressively: take several actions per tick while we can
+    const maxActions = coins[AI_TEAM] > 200 ? 3 : coins[AI_TEAM] > 100 ? 2 : 1;
+    for (let n = 0; n < maxActions; n++) {
+      const snap = buildAiSnapshot();
+      const action = aiBrain.decide(snap);
+      if (action.type === "noop") break;
+
+      if (action.type === "research") {
+        if (!beginResearch(AI_TEAM, action.id)) break;
+        continue;
+      }
+
+      if (action.type === "build") {
+        const slot = slots.find(
+          (s) => s.team === AI_TEAM && s.index === action.slotIndex,
+        );
+        if (!slot) break;
+        if (!placeBuilding(slot, action.kind)) break;
+        continue;
+      }
+
+      if (action.type === "collapse") {
+        const slot = slots.find(
+          (s) => s.team === AI_TEAM && s.index === action.slotIndex,
+        );
+        if (!slot || !collapseBuilding(slot)) break;
+        // Collapse frees the pad only after teardown — pending rebuild handled by brain
+        break;
+      }
     }
-
-    const empty = slots.filter((s) => s.team === AI_TEAM && !s.building);
-    const kind = aiPickBuildKind();
-    const cost = BUILDING_COST[kind];
-
-    // Prefer building on empty sites
-    if (empty.length > 0 && coins[AI_TEAM] >= cost) {
-      const slot = empty[Math.floor(Math.random() * empty.length)];
-      placeBuilding(slot, kind);
-      return;
-    }
-
-    // Rebuild: collapse a poorly matching building if we can afford the counter
-    const living = slots.filter(
-      (s) => s.team === AI_TEAM && s.building && !s.building.destroyed,
-    );
-    if (living.length <= 1) return;
-    if (coins[AI_TEAM] < cost + 20) return;
-
-    const own = countBuildingsByKind(AI_TEAM);
-    // Collapse excess of non-counter types
-    const unwanted = living.filter((s) => s.building!.kind !== kind);
-    if (unwanted.length === 0) return;
-    // Prefer collapsing depots if we already have 2+, else random mismatch
-    unwanted.sort((a, b) => {
-      const score = (s: Slot) =>
-        s.building!.kind === "depot" && own.depot > 1
-          ? 0
-          : s.building!.kind === "researchLab" && own.researchLab > 1
-            ? 0
-            : s.building!.kind === kind
-              ? 2
-              : 1;
-      return score(a) - score(b);
-    });
-    collapseBuilding(unwanted[0]);
   }
 
   function checkEndConditions(): void {
@@ -1815,7 +1718,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     );
   }
 
-  let elapsed = 0;
+  // `elapsed` is declared near AI setup so snapshots can read match time
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
     elapsed += dt;
@@ -1861,8 +1764,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
       aiCooldown -= dt;
       if (aiCooldown <= 0) {
-        aiCooldown = AI_DECISION_INTERVAL_SEC;
         runAiDecision();
+        aiCooldown = nextAiCooldown();
       }
 
       tickResearch(PLAYER_TEAM, dt);
