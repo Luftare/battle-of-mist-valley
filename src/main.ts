@@ -1,5 +1,6 @@
 import { Engine } from "@babylonjs/core";
 import { createGameWorld } from "./game/createGameWorld";
+import { showOnboarding } from "./ui/onboarding";
 
 const canvas = document.getElementById("renderCanvas");
 if (!(canvas instanceof HTMLCanvasElement)) {
@@ -13,6 +14,11 @@ const engine = new Engine(canvas, true, {
 });
 
 const game = createGameWorld(engine, canvas);
+game.setPaused(true);
+
+showOnboarding({
+  onDismiss: () => game.setPaused(false),
+});
 
 engine.runRenderLoop(() => {
   game.scene.render();

@@ -107,6 +107,7 @@ const CLICK_DRAG_PX = 12;
 
 export interface GameWorld {
   scene: Scene;
+  setPaused: (paused: boolean) => void;
   dispose: () => void;
 }
 
@@ -213,7 +214,7 @@ function spawnIntervalFor(kind: BuildingKind, infantryProdBonus = false): number
 }
 
 /**
- * Auto-battler arena: empty platforms, build/collapse economy, supply trucks, AI.
+ * Auto battler arena: empty platforms, build/collapse economy, supply trucks, AI.
  */
 export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): GameWorld {
   const scene = new Scene(engine);
@@ -1842,8 +1843,15 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   }
 
   // `elapsed` is declared near AI setup so snapshots can read match time
+  let paused = false;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
+    if (paused) {
+      // Meadow + empty pads keep a little life under the tip overlay
+      terrain.update(dt, elapsed);
+      for (const slot of slots) slot.platform.update(dt, elapsed);
+      return;
+    }
     elapsed += dt;
     terrain.update(dt, elapsed);
     hud.update(dt);
@@ -2026,6 +2034,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   return {
     scene,
+    setPaused: (value: boolean) => {
+      paused = value;
+    },
     dispose: () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);

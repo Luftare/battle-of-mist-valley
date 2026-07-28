@@ -72,7 +72,7 @@ export function createHud(): HudHandle {
   top.className = "hud-top";
   top.innerHTML = `
     <div class="hud-brand">
-      <h1>Auto Battler</h1>
+      <h1>Mist Valley</h1>
       <p>Tap your platforms to build · Research Lab unlocks upgrades</p>
     </div>
     <div class="hud-coins" id="hudCoins" aria-live="polite">
