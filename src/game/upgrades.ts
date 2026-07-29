@@ -1,6 +1,6 @@
 /**
  * Research Lab tech tree — team-wide upgrades unlocked over time.
- * Durations sit between 5–20s; only supply logistics stacks (×5).
+ * Durations sit between 5–20s; Logistics Surge and Rapid Deployment stack (×5).
  * Effects are intentionally strong and expensive mid/late-game investments.
  */
 
@@ -17,13 +17,13 @@ export type UpgradeId =
   | "turretRange"
   | "turretRegen";
 
-/** Which unit/building icon to show on the research card. */
+/** Unit icon for the research card (never the producing building). */
 export const UPGRADE_SUBJECT: Record<UpgradeId, ThumbId> = {
   supplySpeed: "supplyTruck",
   infantryAccuracy: "rifleman",
   tankHp: "tank",
   heliMissiles: "helicopter",
-  infantryProd: "barracks",
+  infantryProd: "rifleman",
   tankSplash: "tank",
   tankFireRate: "tank",
   turretRange: "turret",
@@ -50,8 +50,11 @@ export const SUPPLY_SPEED_BONUS_PER_LEVEL = 0.25;
 export const INFANTRY_ACCURACY_MUL = 1.35;
 /** Reinforced Armor multiplies tank max/current HP. */
 export const TANK_HP_MUL = 1.5;
-/** Rapid Deployment divides barracks spawn interval. */
-export const INFANTRY_PROD_MUL = 1.4;
+/**
+ * Rapid Deployment: +0.4× spawn rate per level (÷ interval).
+ * Level 5 → 3× original barracks production.
+ */
+export const INFANTRY_PROD_BONUS_PER_LEVEL = 0.4;
 /** Heavy Shells multiplies tank splash radius. */
 export const TANK_SPLASH_MUL = 2;
 /** Autoloaders doubles tank fire rate. */
@@ -59,11 +62,17 @@ export const TANK_FIRE_RATE_MUL = 2;
 /** Extended Optics multiplies turret engagement range. */
 export const TURRET_RANGE_MUL = 1.5;
 
+/** Barracks spawn-rate multiplier from Rapid Deployment stacks (1 at level 0). */
+export function infantryProdMul(level: number): number {
+  if (level <= 0) return 1;
+  return 1 + INFANTRY_PROD_BONUS_PER_LEVEL * level;
+}
+
 export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   supplySpeed: {
     id: "supplySpeed",
     label: "Logistics Surge",
-    blurb: "+25% coin rate from trucks. Stacks ×5.",
+    blurb: "+25% coin rate from trucks.",
     cost: 80,
     durationSec: 20,
     maxLevel: 5,
@@ -96,10 +105,11 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   infantryProd: {
     id: "infantryProd",
     label: "Rapid Deployment",
-    blurb: "Barracks +40% spawn rate.",
+    blurb: "+40% barracks spawn rate.",
     cost: 200,
     durationSec: 30,
-    maxLevel: 1,
+    maxLevel: 5,
+    costPerLevel: 70,
   },
   tankSplash: {
     id: "tankSplash",
@@ -135,14 +145,20 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   },
 };
 
+/** Display / research-board order — grouped by unit type affected. */
 export const UPGRADE_IDS: UpgradeId[] = [
+  // Supply truck
   "supplySpeed",
+  // Rifleman
   "infantryAccuracy",
-  "tankHp",
-  "heliMissiles",
   "infantryProd",
+  // Tank
+  "tankHp",
   "tankSplash",
   "tankFireRate",
+  // Helicopter
+  "heliMissiles",
+  // Turret
   "turretRange",
   "turretRegen",
 ];

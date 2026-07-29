@@ -44,20 +44,65 @@ body {
   gap: 0.75rem;
 }
 
-.hud-brand h1 {
-  font-size: clamp(0.95rem, 3.5vw, 1.15rem);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: #e8f0e4;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+.hud-flag {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.3rem 0.55rem 0.3rem 0.45rem;
+  background: rgba(12, 22, 14, 0.72);
+  border: 1px solid rgba(180, 200, 160, 0.28);
+  border-radius: 0.35rem;
+  min-height: 2rem;
 }
 
-.hud-brand p {
-  margin-top: 0.2rem;
-  font-size: clamp(0.7rem, 2.5vw, 0.8rem);
-  color: rgba(220, 230, 215, 0.75);
+.hud-flag-cloth {
+  width: 1.2rem;
+  height: 0.78rem;
+  border-radius: 0.1rem 0.14rem 0.14rem 0.1rem;
+  background: #8a8a82;
+  box-shadow: inset 0 -1px 0 rgba(0, 0, 0, 0.25);
+  transform-origin: left center;
+  animation: hud-flag-wave 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+.hud-flag--blue .hud-flag-cloth {
+  background: linear-gradient(160deg, #6aa8d8, #3a6ea5);
+}
+
+.hud-flag--red .hud-flag-cloth {
+  background: linear-gradient(160deg, #d86a6a, #a53a3a);
+}
+
+.hud-flag--neutral .hud-flag-cloth {
+  background: linear-gradient(160deg, #a8a89e, #6e6e66);
+}
+
+.hud-flag--blue {
+  border-color: rgba(106, 168, 216, 0.45);
+}
+
+.hud-flag--red {
+  border-color: rgba(216, 106, 106, 0.45);
+}
+
+.hud-flag-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(232, 240, 228, 0.88);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+@keyframes hud-flag-wave {
+  0%,
+  100% {
+    transform: skewY(0deg) scaleX(1);
+  }
+  50% {
+    transform: skewY(-6deg) scaleX(0.94);
+  }
 }
 
 .hud-coins {

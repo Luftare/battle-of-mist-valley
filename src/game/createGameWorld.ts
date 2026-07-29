@@ -63,7 +63,7 @@ import { createAiBrain, type AiSlotView, type AiSnapshot } from "./aiStrategy";
 import {
   createTeamTechLevels,
   INFANTRY_ACCURACY_MUL,
-  INFANTRY_PROD_MUL,
+  infantryProdMul,
   SUPPLY_SPEED_BONUS_PER_LEVEL,
   TANK_HP_MUL,
   TANK_SPLASH_MUL,
@@ -207,10 +207,10 @@ function scatterAim(from: Vector3, aim: Vector3, radius = MISS_SCATTER_RADIUS): 
   );
 }
 
-function spawnIntervalFor(kind: BuildingKind, infantryProdBonus = false): number {
+function spawnIntervalFor(kind: BuildingKind, infantryProdLevel = 0): number {
   if (kind === "researchLab") return Infinity;
-  if (kind === "barracks" && infantryProdBonus) {
-    return SPAWN_INTERVAL_SEC / INFANTRY_PROD_MUL;
+  if (kind === "barracks") {
+    return SPAWN_INTERVAL_SEC / infantryProdMul(infantryProdLevel);
   }
   if (kind === "factory") return FACTORY_SPAWN_INTERVAL_SEC;
   return SPAWN_INTERVAL_SEC;
@@ -1893,6 +1893,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       if (playerInRange && !aiInRange) flagOwner = PLAYER_TEAM;
       else if (aiInRange && !playerInRange) flagOwner = AI_TEAM;
       captureFlag.setOwner(flagOwner);
+      hud.setFlagOwner(flagOwner);
       if (flagOwner) {
         flagCoinCooldown -= dt;
         if (flagCoinCooldown <= 0) {
@@ -1951,7 +1952,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         spawnFrom(slot);
         slot.spawnCooldown = spawnIntervalFor(
           b.kind,
-          techLevels[b.team].infantryProd > 0,
+          techLevels[b.team].infantryProd,
         );
       }
     }

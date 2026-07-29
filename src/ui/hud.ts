@@ -1,4 +1,5 @@
 import type { BuildingKind } from "../buildings/types";
+import type { FlagOwner } from "../buildings/captureFlag";
 import {
   BUILDING_COST,
   BUILDING_KINDS,
@@ -43,6 +44,8 @@ export interface BuildModalOpts {
 
 export interface HudHandle {
   setCoins: (n: number) => void;
+  /** Which team holds the center hill (null = contested / empty). */
+  setFlagOwner: (owner: FlagOwner) => void;
   /** Attach baked unit/building PNG data-URLs for menu icons. */
   setThumbs: (thumbs: ThumbMap) => void;
   /** Drive the displayed coin tween each frame. */
@@ -97,9 +100,15 @@ export function createHud(): HudHandle {
   const top = document.createElement("div");
   top.className = "hud-top";
   top.innerHTML = `
-    <div class="hud-brand">
-      <h1>Mist Valley</h1>
-      <p>Tap platforms to build · icons show what you get</p>
+    <div
+      class="hud-flag hud-flag--neutral"
+      id="hudFlag"
+      role="status"
+      aria-live="polite"
+      aria-label="Hill unclaimed"
+    >
+      <span class="hud-flag-cloth" aria-hidden="true"></span>
+      <span class="hud-flag-label" id="hudFlagLabel">Hill</span>
     </div>
     <div class="hud-coins" id="hudCoins" aria-live="polite">
       <span class="coin-icon" aria-hidden="true"></span>
@@ -268,6 +277,25 @@ export function createHud(): HudHandle {
       }
       targetCoins = next;
       if (!modalHost.hidden && modalMode === "build") applyBuildAfford(next);
+    },
+    setFlagOwner: (owner) => {
+      const el = document.getElementById("hudFlag");
+      const label = document.getElementById("hudFlagLabel");
+      if (!el) return;
+      el.classList.remove("hud-flag--neutral", "hud-flag--blue", "hud-flag--red");
+      if (owner === "blue") {
+        el.classList.add("hud-flag--blue");
+        el.setAttribute("aria-label", "You hold the hill");
+        if (label) label.textContent = "Yours";
+      } else if (owner === "red") {
+        el.classList.add("hud-flag--red");
+        el.setAttribute("aria-label", "Enemy holds the hill");
+        if (label) label.textContent = "Enemy";
+      } else {
+        el.classList.add("hud-flag--neutral");
+        el.setAttribute("aria-label", "Hill unclaimed");
+        if (label) label.textContent = "Hill";
+      }
     },
     setThumbs: (next) => {
       thumbs = next;
