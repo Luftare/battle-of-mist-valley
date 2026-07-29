@@ -1,0 +1,1007 @@
+{
+  "collectedAt": "2026-07-29T11:26:32.204Z",
+  "url": "http://127.0.0.1:5174/",
+  "devices": [
+    {
+      "device": "iPhone14Pro_like",
+      "viewport": {
+        "width": 393,
+        "height": 852,
+        "deviceScaleFactor": 3,
+        "isMobile": true,
+        "hasTouch": true
+      },
+      "scenarios": {
+        "paused_onboarding": {
+          "sampleCount": 20,
+          "fps": {
+            "avg": 120.04838665522773,
+            "min": 119.61722487469734,
+            "max": 120.48192771084359
+          },
+          "deltaMs": {
+            "avg": 8.155000004172326,
+            "max": 8.600000023841858
+          },
+          "frameTimeMs": {
+            "avg": 2.1635919226911877,
+            "max": 2.911764705882353
+          },
+          "renderTimeMs": {
+            "avg": 0.8892895000948331,
+            "max": 1.4088235313401503
+          },
+          "interFrameMs": {
+            "avg": 7.465268898131173,
+            "max": 11.898529411238783
+          },
+          "activeMeshes": {
+            "avg": 333,
+            "max": 333
+          },
+          "drawCalls": {
+            "avg": 333,
+            "max": 333
+          },
+          "gpuFrameUsAvg": {
+            "avg": 733141.8633631396,
+            "max": 842205.8196721311
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 0,
+            "max": 0
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "393x852",
+            "buffer": "1179x2556",
+            "dpr": 3,
+            "hardwareScaling": 0.3333333333333333,
+            "pixelFillPerFrame": 3013524
+          }
+        },
+        "paused_onboarding_static": {
+          "meshes": 850,
+          "vertices": 23918,
+          "indices": 34846,
+          "materials": 125,
+          "snapshot": {
+            "paused": true,
+            "elapsed": 0,
+            "agentCount": 0,
+            "livingAgents": 0,
+            "buildingCount": 0,
+            "turretCount": 6,
+            "particleSystems": 0
+          },
+          "canvas": {
+            "css": [
+              393,
+              852
+            ],
+            "buffer": [
+              1179,
+              2556
+            ],
+            "dpr": 3
+          },
+          "engineOpts": {
+            "antialias": true,
+            "adaptToDeviceRatio": true,
+            "preserveDrawingBuffer": true,
+            "stencil": true
+          }
+        },
+        "early_play": {
+          "sampleCount": 25,
+          "fps": {
+            "avg": 119.9752430601703,
+            "min": 119.52191235059799,
+            "max": 120.24048096192419
+          },
+          "deltaMs": {
+            "avg": 8.30400000333786,
+            "max": 9.300000011920929
+          },
+          "frameTimeMs": {
+            "avg": 2.1262438024174077,
+            "max": 2.177499997615814
+          },
+          "renderTimeMs": {
+            "avg": 0.8455702491913287,
+            "max": 0.87520661432881
+          },
+          "interFrameMs": {
+            "avg": 6.207698346422396,
+            "max": 6.259504131541765
+          },
+          "activeMeshes": {
+            "avg": 366.52,
+            "max": 368
+          },
+          "drawCalls": {
+            "avg": 366.52,
+            "max": 368
+          },
+          "gpuFrameUsAvg": {
+            "avg": 783792.420491803,
+            "max": 889577.35
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 1,
+            "max": 1
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "393x852",
+            "buffer": "1179x2556",
+            "dpr": 3,
+            "hardwareScaling": 0.3333333333333333,
+            "pixelFillPerFrame": 3013524
+          }
+        },
+        "early_play_static": {
+          "meshes": {
+            "total": 878,
+            "visible": 846,
+            "transparent": 29,
+            "shadows": 26,
+            "hpBars": 14,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 463
+          },
+          "materials": 135,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat": {
+          "sampleCount": 29,
+          "fps": {
+            "avg": 117.44069139247864,
+            "min": 107.71992818671472,
+            "max": 121.40833672335886
+          },
+          "deltaMs": {
+            "avg": 8.665517233569046,
+            "max": 11.800000011920929
+          },
+          "frameTimeMs": {
+            "avg": 7.911468021397943,
+            "max": 8.162711862285258
+          },
+          "renderTimeMs": {
+            "avg": 3.3293719449643797,
+            "max": 3.5957627124705556
+          },
+          "interFrameMs": {
+            "avg": 0.6170671154993602,
+            "max": 0.7162393153223217
+          },
+          "activeMeshes": {
+            "avg": 1306.1724137931035,
+            "max": 1329
+          },
+          "drawCalls": {
+            "avg": 1306.1724137931035,
+            "max": 1329
+          },
+          "gpuFrameUsAvg": {
+            "avg": 1371557.9186635495,
+            "max": 1478591.9166666667
+          },
+          "livingAgents": {
+            "last": 72,
+            "max": 72
+          },
+          "buildings": {
+            "last": 20,
+            "max": 20
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "393x852",
+            "buffer": "1179x2556",
+            "dpr": 3,
+            "hardwareScaling": 0.3333333333333333,
+            "pixelFillPerFrame": 3013524
+          }
+        },
+        "mid_combat_static": {
+          "meshes": {
+            "total": 3169,
+            "visible": 3043,
+            "transparent": 175,
+            "shadows": 117,
+            "hpBars": 196,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 2481
+          },
+          "materials": 1073,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat_final": {
+          "paused": false,
+          "elapsed": 15.164999999999953,
+          "agentCount": 72,
+          "livingAgents": 72,
+          "buildingCount": 20,
+          "turretCount": 6,
+          "particleSystems": 0
+        },
+        "tab_hidden": {
+          "fpsBeforeWait": 112.23344556177386,
+          "fpsAfter1s": 112.23344556177386
+        }
+      },
+      "fillRate": {
+        "cssPixels": 334836,
+        "bufferPixels": 3013524,
+        "dpr": 3,
+        "hardwareScaling": 0.3333333333333333,
+        "megapixelsPerFrame": 3.013524,
+        "megapixelsPerSecondAt60": 180.81144
+      }
+    },
+    {
+      "device": "Pixel7_like",
+      "viewport": {
+        "width": 412,
+        "height": 915,
+        "deviceScaleFactor": 2.625,
+        "isMobile": true,
+        "hasTouch": true
+      },
+      "scenarios": {
+        "paused_onboarding": {
+          "sampleCount": 20,
+          "fps": {
+            "avg": 120.07705609689825,
+            "min": 119.90407674432196,
+            "max": 120.43356083623833
+          },
+          "deltaMs": {
+            "avg": 8.169999995827675,
+            "max": 8.5
+          },
+          "frameTimeMs": {
+            "avg": 2.1843638406543264,
+            "max": 2.7358024731094455
+          },
+          "renderTimeMs": {
+            "avg": 0.9131134561361947,
+            "max": 1.306172838917485
+          },
+          "interFrameMs": {
+            "avg": 7.146648188882631,
+            "max": 9.587804874268974
+          },
+          "activeMeshes": {
+            "avg": 332,
+            "max": 332
+          },
+          "drawCalls": {
+            "avg": 332,
+            "max": 332
+          },
+          "gpuFrameUsAvg": {
+            "avg": 607296.994200653,
+            "max": 654871.131147541
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 0,
+            "max": 0
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "412x915",
+            "buffer": "1081x2401",
+            "dpr": 2.625,
+            "hardwareScaling": 0.38095238095238093,
+            "pixelFillPerFrame": 2595481
+          }
+        },
+        "paused_onboarding_static": {
+          "meshes": 850,
+          "vertices": 23918,
+          "indices": 34846,
+          "materials": 125,
+          "snapshot": {
+            "paused": true,
+            "elapsed": 0,
+            "agentCount": 0,
+            "livingAgents": 0,
+            "buildingCount": 0,
+            "turretCount": 6,
+            "particleSystems": 0
+          },
+          "canvas": {
+            "css": [
+              412,
+              915
+            ],
+            "buffer": [
+              1081,
+              2401
+            ],
+            "dpr": 2.625
+          },
+          "engineOpts": {
+            "antialias": true,
+            "adaptToDeviceRatio": true,
+            "preserveDrawingBuffer": true,
+            "stencil": true
+          }
+        },
+        "early_play": {
+          "sampleCount": 25,
+          "fps": {
+            "avg": 120.03660406753599,
+            "min": 119.95201918088756,
+            "max": 120.48192771084285
+          },
+          "deltaMs": {
+            "avg": 8.475999999046326,
+            "max": 9.300000011920929
+          },
+          "frameTimeMs": {
+            "avg": 2.141477960101189,
+            "max": 2.2500000010102483
+          },
+          "renderTimeMs": {
+            "avg": 0.8669350288835135,
+            "max": 0.9525423726793063
+          },
+          "interFrameMs": {
+            "avg": 6.197716949288086,
+            "max": 6.237500000496706
+          },
+          "activeMeshes": {
+            "avg": 361.04,
+            "max": 363
+          },
+          "drawCalls": {
+            "avg": 361.04,
+            "max": 363
+          },
+          "gpuFrameUsAvg": {
+            "avg": 710655.9555191254,
+            "max": 771998.8360655737
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 1,
+            "max": 1
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "412x915",
+            "buffer": "1081x2401",
+            "dpr": 2.625,
+            "hardwareScaling": 0.38095238095238093,
+            "pixelFillPerFrame": 2595481
+          }
+        },
+        "early_play_static": {
+          "meshes": {
+            "total": 878,
+            "visible": 846,
+            "transparent": 29,
+            "shadows": 26,
+            "hpBars": 14,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 463
+          },
+          "materials": 135,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat": {
+          "sampleCount": 29,
+          "fps": {
+            "avg": 116.7891768060065,
+            "min": 113.50737797444837,
+            "max": 120.19230770952802
+          },
+          "deltaMs": {
+            "avg": 8.35862068061171,
+            "max": 9.5
+          },
+          "frameTimeMs": {
+            "avg": 8.082934202526346,
+            "max": 8.219827586206897
+          },
+          "renderTimeMs": {
+            "avg": 3.2532844984584885,
+            "max": 3.382758621511788
+          },
+          "interFrameMs": {
+            "avg": 0.4814956246127366,
+            "max": 0.617094015973246
+          },
+          "activeMeshes": {
+            "avg": 1284.0689655172414,
+            "max": 1306
+          },
+          "drawCalls": {
+            "avg": 1284.0689655172414,
+            "max": 1306
+          },
+          "gpuFrameUsAvg": {
+            "avg": 1244868.9567806688,
+            "max": 1377929.5423728814
+          },
+          "livingAgents": {
+            "last": 72,
+            "max": 72
+          },
+          "buildings": {
+            "last": 20,
+            "max": 20
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "412x915",
+            "buffer": "1081x2401",
+            "dpr": 2.625,
+            "hardwareScaling": 0.38095238095238093,
+            "pixelFillPerFrame": 2595481
+          }
+        },
+        "mid_combat_static": {
+          "meshes": {
+            "total": 3165,
+            "visible": 3039,
+            "transparent": 171,
+            "shadows": 117,
+            "hpBars": 196,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 2477
+          },
+          "materials": 1069,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat_final": {
+          "paused": false,
+          "elapsed": 15.247299999952293,
+          "agentCount": 72,
+          "livingAgents": 72,
+          "buildingCount": 20,
+          "turretCount": 6,
+          "particleSystems": 0
+        },
+        "tab_hidden": {
+          "fpsBeforeWait": 114.67889909824555,
+          "fpsAfter1s": 114.67889909824555
+        }
+      },
+      "fillRate": {
+        "cssPixels": 376980,
+        "bufferPixels": 2595481,
+        "dpr": 2.625,
+        "hardwareScaling": 0.38095238095238093,
+        "megapixelsPerFrame": 2.595481,
+        "megapixelsPerSecondAt60": 155.72886
+      }
+    },
+    {
+      "device": "desktop_1x",
+      "viewport": {
+        "width": 1280,
+        "height": 720,
+        "deviceScaleFactor": 1,
+        "isMobile": false,
+        "hasTouch": false
+      },
+      "scenarios": {
+        "paused_onboarding": {
+          "sampleCount": 20,
+          "fps": {
+            "avg": 120.00022669479976,
+            "min": 119.52191235059763,
+            "max": 120.53033344993771
+          },
+          "deltaMs": {
+            "avg": 8.379999998211861,
+            "max": 9.100000023841858
+          },
+          "frameTimeMs": {
+            "avg": 2.809258631407839,
+            "max": 3.410588239221012
+          },
+          "renderTimeMs": {
+            "avg": 1.5192634918212193,
+            "max": 2.011764710790971
+          },
+          "interFrameMs": {
+            "avg": 6.403690141227186,
+            "max": 8.451764702095705
+          },
+          "activeMeshes": {
+            "avg": 652,
+            "max": 652
+          },
+          "drawCalls": {
+            "avg": 652,
+            "max": 652
+          },
+          "gpuFrameUsAvg": {
+            "avg": 387093.0955013343,
+            "max": 484180.62790697673
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 0,
+            "max": 0
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "1280x720",
+            "buffer": "1280x720",
+            "dpr": 1,
+            "hardwareScaling": 1,
+            "pixelFillPerFrame": 921600
+          }
+        },
+        "paused_onboarding_static": {
+          "meshes": 850,
+          "vertices": 23918,
+          "indices": 34846,
+          "materials": 125,
+          "snapshot": {
+            "paused": true,
+            "elapsed": 0,
+            "agentCount": 0,
+            "livingAgents": 0,
+            "buildingCount": 0,
+            "turretCount": 6,
+            "particleSystems": 0
+          },
+          "canvas": {
+            "css": [
+              1280,
+              720
+            ],
+            "buffer": [
+              1280,
+              720
+            ],
+            "dpr": 1
+          },
+          "engineOpts": {
+            "antialias": true,
+            "adaptToDeviceRatio": true,
+            "preserveDrawingBuffer": true,
+            "stencil": true
+          }
+        },
+        "early_play": {
+          "sampleCount": 25,
+          "fps": {
+            "avg": 119.97327636120227,
+            "min": 119.52191235059719,
+            "max": 120.28869287436967
+          },
+          "deltaMs": {
+            "avg": 8.396000006198882,
+            "max": 9.300000011920929
+          },
+          "frameTimeMs": {
+            "avg": 3.020106060825104,
+            "max": 3.060833334426085
+          },
+          "renderTimeMs": {
+            "avg": 1.6980399448902819,
+            "max": 1.722314048404536
+          },
+          "interFrameMs": {
+            "avg": 5.311629476449542,
+            "max": 5.362809915680531
+          },
+          "activeMeshes": {
+            "avg": 802.08,
+            "max": 804
+          },
+          "drawCalls": {
+            "avg": 802.08,
+            "max": 804
+          },
+          "gpuFrameUsAvg": {
+            "avg": 357007.39430212096,
+            "max": 374096.5081967213
+          },
+          "livingAgents": {
+            "last": 0,
+            "max": 0
+          },
+          "buildings": {
+            "last": 1,
+            "max": 1
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "1280x720",
+            "buffer": "1280x720",
+            "dpr": 1,
+            "hardwareScaling": 1,
+            "pixelFillPerFrame": 921600
+          }
+        },
+        "early_play_static": {
+          "meshes": {
+            "total": 872,
+            "visible": 840,
+            "transparent": 26,
+            "shadows": 26,
+            "hpBars": 14,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 457
+          },
+          "materials": 137,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat": {
+          "sampleCount": 28,
+          "fps": {
+            "avg": 84.94227542199349,
+            "min": 82.28195281963313,
+            "max": 87.43806471328178
+          },
+          "deltaMs": {
+            "avg": 12.25,
+            "max": 16.100000023841858
+          },
+          "frameTimeMs": {
+            "avg": 11.390129611850302,
+            "max": 11.801219517137946
+          },
+          "renderTimeMs": {
+            "avg": 6.344493927116424,
+            "max": 6.554878054595575
+          },
+          "interFrameMs": {
+            "avg": 0.4170803818001077,
+            "max": 0.44651162901590036
+          },
+          "activeMeshes": {
+            "avg": 2705.6071428571427,
+            "max": 2709
+          },
+          "drawCalls": {
+            "avg": 2705.6071428571427,
+            "max": 2709
+          },
+          "gpuFrameUsAvg": {
+            "avg": 890608.8025035595,
+            "max": 977196.2558139535
+          },
+          "livingAgents": {
+            "last": 72,
+            "max": 72
+          },
+          "buildings": {
+            "last": 20,
+            "max": 20
+          },
+          "particleSystems": {
+            "last": 0,
+            "max": 0
+          },
+          "resolution": {
+            "css": "1280x720",
+            "buffer": "1280x720",
+            "dpr": 1,
+            "hardwareScaling": 1,
+            "pixelFillPerFrame": 921600
+          }
+        },
+        "mid_combat_static": {
+          "meshes": {
+            "total": 3167,
+            "visible": 3045,
+            "transparent": 168,
+            "shadows": 117,
+            "hpBars": 196,
+            "grass": 280,
+            "trees": 95,
+            "rocks": 0,
+            "other": 2479
+          },
+          "materials": 1075,
+          "lights": 2,
+          "cameras": 1,
+          "particleSystems": 0,
+          "animations": 0,
+          "fogMode": 3,
+          "clearColor": [
+            0.55,
+            0.72,
+            0.88,
+            1
+          ],
+          "antialias": true,
+          "engineDescription": "WebGL2 - Parallel shader compilation",
+          "webGLVersion": 2,
+          "powerPreference": "unknown",
+          "preserveDrawingBuffer": null,
+          "stencil": true,
+          "adaptToDeviceRatio": true
+        },
+        "mid_combat_final": {
+          "paused": false,
+          "elapsed": 15.138999999999973,
+          "agentCount": 72,
+          "livingAgents": 72,
+          "buildingCount": 20,
+          "turretCount": 6,
+          "particleSystems": 0
+        },
+        "tab_hidden": {
+          "fpsBeforeWait": 85.54319930402323,
+          "fpsAfter1s": 85.54319930402323
+        }
+      },
+      "fillRate": {
+        "cssPixels": 921600,
+        "bufferPixels": 921600,
+        "dpr": 1,
+        "hardwareScaling": 1,
+        "megapixelsPerFrame": 0.9216,
+        "megapixelsPerSecondAt60": 55.296
+      }
+    }
+  ],
+  "traces": [
+    {
+      "device": "iPhone14Pro_like",
+      "eventCount": 84784,
+      "topEvents": [
+        [
+          "RunTask",
+          27681
+        ],
+        [
+          "GPUTask",
+          3027
+        ],
+        [
+          "PipelineReporter",
+          2384
+        ],
+        [
+          "BeginImplFrameToSendBeginMainFrame",
+          2384
+        ],
+        [
+          "EndActivateToSubmitCompositorFrame",
+          2360
+        ],
+        [
+          "SubmitCompositorFrameToPresentationCompositorFrame",
+          2360
+        ],
+        [
+          "SubmitToReceiveCompositorFrame",
+          2360
+        ],
+        [
+          "ReceiveCompositorFrameToStartDraw",
+          2360
+        ],
+        [
+          "StartDrawToSwapStart",
+          2360
+        ],
+        [
+          "BufferReadyToLatch",
+          2360
+        ],
+        [
+          "LatchToSwapEnd",
+          2360
+        ],
+        [
+          "SwapEndToPresentationCompositorFrame",
+          2360
+        ],
+        [
+          "AnimationFrame",
+          2348
+        ],
+        [
+          "BufferAvailableToBufferReady",
+          2084
+        ],
+        [
+          "Commit",
+          1768
+        ],
+        [
+          "SendBeginMainFrameToCommit",
+          1180
+        ],
+        [
+          "EndCommitToActivation",
+          1180
+        ],
+        [
+          "Activation",
+          1180
+        ],
+        [
+          "SetLayerTreeId",
+          1177
+        ],
+        [
+          "PrePaint",
+          1177
+        ],
+        [
+          "IntersectionObserverController::computeIntersections",
+          1176
+        ],
+        [
+          "Paint",
+          1176
+        ],
+        [
+          "UpdateLayer",
+          1176
+        ],
+        [
+          "AnimationFrame::Render",
+          1176
+        ],
+        [
+          "AnimationFrame::StyleAndLayout",
+          1176
+        ]
+      ],
+      "totalsUs": {
+        "scriptUs": 1450682,
+        "gpuUs": 685582,
+        "paintUs": 26197,
+        "compositeUs": 0
+      },
+      "rafRelatedEvents": 1177
+    }
+  ],
+  "notes": [
+    "Headless Chrome on desktop approximates mobile DPR/viewport fill-rate; absolute GPU µs differs from real phones.",
+    "Relative comparisons (paused vs combat, 1x vs 3x DPR) are the primary signal."
+  ]
+}

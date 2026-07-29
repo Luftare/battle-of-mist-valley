@@ -1,0 +1,167 @@
+{
+  "collectedAt": "2026-07-29T11:29:33.253Z",
+  "pausedInventory": {
+    "meshCount": 850,
+    "transformNodes": 354,
+    "materials": 125,
+    "textures": 0,
+    "lights": 2,
+    "particles": 0,
+    "verts": 23918,
+    "indices": 34846,
+    "trianglesApprox": 11615.333333333334,
+    "alphaMeshes": 25,
+    "disabledLighting": 38,
+    "byPrefix": {
+      "ground": 1,
+      "tree": 114,
+      "grass": 280,
+      "flag": 5,
+      "blue": 225,
+      "red": 225
+    },
+    "canvas": {
+      "css": [
+        393,
+        852
+      ],
+      "buffer": [
+        1179,
+        2556
+      ],
+      "dpr": 3,
+      "hwScale": 0.3333333333333333
+    },
+    "snapshot": {
+      "paused": true,
+      "elapsed": 0,
+      "agentCount": 0,
+      "livingAgents": 0,
+      "buildingCount": 0,
+      "turretCount": 6,
+      "particleSystems": 0
+    }
+  },
+  "pausedFrameCost": {
+    "n": 120,
+    "fps": 120.02333686906688,
+    "frameMs": 2.6996012764872295,
+    "renderMs": 1.2963806740324946,
+    "activeMeshes": 0,
+    "drawCalls": 333,
+    "gpuUs": 405296.1473037105
+  },
+  "combatInventory": {
+    "meshCount": 3168,
+    "transformNodes": 1108,
+    "materials": 1077,
+    "textures": 10,
+    "particles": 0,
+    "verts": 80870,
+    "indices": 130282,
+    "trianglesApprox": 43427.333333333336,
+    "alphaMeshes": 169,
+    "byPrefix": {
+      "ground": 1,
+      "tree": 114,
+      "grass": 280,
+      "flag": 5,
+      "blue": 1379,
+      "red": 1379,
+      "coinPop": 10
+    },
+    "snapshot": {
+      "paused": false,
+      "elapsed": 3.076100000023834,
+      "agentCount": 72,
+      "livingAgents": 72,
+      "buildingCount": 20,
+      "turretCount": 6,
+      "particleSystems": 0
+    }
+  },
+  "combatFrameCost": {
+    "n": 180,
+    "fps": 120.1480569575429,
+    "frameMs": 7.588335859827959,
+    "renderMs": 3.1176142478189233,
+    "activeMeshes": 0,
+    "drawCalls": 1322.15,
+    "gpuUs": 676187.1159077096,
+    "agents": 72,
+    "particlesMax": 0
+  },
+  "scalingExperiment": [
+    {
+      "hardwareScaling": 1,
+      "buffer": [
+        393,
+        852
+      ],
+      "megapixels": 0.334836,
+      "fps": 118.63916685002317,
+      "frameMs": 7.562958999669638,
+      "renderMs": 3.1734148945129967,
+      "drawCalls": 1338.5666666666666,
+      "gpuUs": 383258.2785185191,
+      "agents": 72
+    },
+    {
+      "hardwareScaling": 0.5,
+      "buffer": [
+        786,
+        1704
+      ],
+      "megapixels": 1.339344,
+      "fps": 119.13583706928642,
+      "frameMs": 7.64893518780117,
+      "renderMs": 3.2505092557657633,
+      "drawCalls": 1334.3555555555556,
+      "gpuUs": 387869.82185185206,
+      "agents": 72
+    },
+    {
+      "hardwareScaling": 0.333333,
+      "buffer": [
+        1179,
+        2556
+      ],
+      "megapixels": 3.013524,
+      "fps": 119.79007397650112,
+      "frameMs": 8.065517240043354,
+      "renderMs": 3.44137931178356,
+      "drawCalls": 1312.1222222222223,
+      "gpuUs": 434386.7683333323,
+      "agents": 72
+    },
+    {
+      "hardwareScaling": 0.25,
+      "buffer": [
+        1572,
+        3408
+      ],
+      "megapixels": 5.357376,
+      "fps": 120.504701986626,
+      "frameMs": 7.8343916794823105,
+      "renderMs": 3.304369582519245,
+      "drawCalls": 1267.911111111111,
+      "gpuUs": 751932.4020005551,
+      "agents": 72
+    }
+  ],
+  "jsHotPath": {
+    "getAbsolutePositionCallsApproxPerFrame": 0
+  },
+  "pausedStillAnimating": {
+    "grassCount": 70,
+    "rotationChangedWhilePaused": false,
+    "before": {
+      "x": 0.01125402198722504,
+      "z": -0.10887178294110532
+    },
+    "after": {
+      "x": 0.01125402198722504,
+      "z": -0.10887178294110532
+    }
+  }
+}

@@ -1846,12 +1846,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   let paused = false;
   scene.onBeforeRenderObservable.add(() => {
     const dt = Math.min(0.05, engine.getDeltaTime() / 1000);
-    if (paused) {
-      // Meadow + empty pads keep a little life under the tip overlay
-      terrain.update(dt, elapsed);
-      for (const slot of slots) slot.platform.update(dt, elapsed);
-      return;
-    }
+    if (paused) return;
     elapsed += dt;
     terrain.update(dt, elapsed);
     hud.update(dt);

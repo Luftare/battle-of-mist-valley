@@ -7,6 +7,7 @@ import {
   TransformNode,
   Vector3,
 } from "@babylonjs/core";
+import { isMobileDevice } from "../platform/mobile";
 
 /** Matches lab sun direction so blob shadows lean the same way. */
 const LIGHT_DIR = new Vector3(-0.45, -0.85, -0.3).normalize();
@@ -40,6 +41,8 @@ export interface BlobShadowOptions {
 }
 
 let shadowMat: StandardMaterial | null = null;
+/** Shared across all blob shadows — halves mobile shadow CPU on alternate frames. */
+let shadowUpdateTick = 0;
 
 function getShadowMaterial(scene: Scene): StandardMaterial {
   if (shadowMat) return shadowMat;
@@ -79,6 +82,10 @@ export function createBlobShadow(
   const getHeight = opts.getCasterHeight;
 
   const update = () => {
+    if (isMobileDevice()) {
+      shadowUpdateTick++;
+      if (shadowUpdateTick % 2 !== 0) return;
+    }
     const scale = follow.scaling.x;
     const world = follow.getAbsolutePosition();
     const casterH = getHeight ? getHeight() * scale : 0.15 * scale;

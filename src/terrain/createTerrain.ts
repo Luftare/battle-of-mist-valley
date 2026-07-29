@@ -17,6 +17,7 @@ import {
 } from "../game/slotLayout";
 import { WORLD_COLORS } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
+import { isMobileDevice } from "../platform/mobile";
 import { createBlobShadow, type BlobShadowHandle } from "../units/shadow";
 
 export interface Obstacle {
@@ -750,7 +751,8 @@ export function createTerrain(
   }
 
   // Decorative only — never added to obstacles
-  for (let i = 0; i < 70; i++) {
+  const grassTuftCount = isMobileDevice() ? 35 : 70;
+  for (let i = 0; i < grassTuftCount; i++) {
     let x = 0;
     let z = 0;
     let attempts = 0;
