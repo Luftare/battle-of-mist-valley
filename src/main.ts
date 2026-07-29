@@ -20,9 +20,9 @@ const engine = new Engine(canvas, !isMobile, {
   powerPreference: isMobile ? "low-power" : "high-performance",
 });
 applyMobilePixelCap(engine);
+// Engine-level cap: skips frames before beginFrame so getDeltaTime stays wall-clock accurate.
+if (isMobile) engine.maxFPS = MOBILE_TARGET_FPS;
 
-const targetFrameMs = isMobile ? 1000 / MOBILE_TARGET_FPS : 0;
-let lastFrameTime = 0;
 let loopActive = false;
 let gamePaused = true;
 
@@ -35,20 +35,12 @@ game.setPaused = (paused: boolean) => {
   else startRenderLoop();
 };
 
-function renderFrame(): void {
-  if (targetFrameMs > 0) {
-    const now = performance.now();
-    if (now - lastFrameTime < targetFrameMs) return;
-    lastFrameTime = now;
-  }
-  game.scene.render();
-}
-
 function startRenderLoop(): void {
   if (loopActive || document.hidden || gamePaused) return;
   loopActive = true;
-  lastFrameTime = 0;
-  engine.runRenderLoop(renderFrame);
+  engine.runRenderLoop(() => {
+    game.scene.render();
+  });
 }
 
 function stopRenderLoop(): void {

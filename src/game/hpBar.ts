@@ -55,7 +55,7 @@ export function createHpBar(scene: Scene, name: string): HpBarHandle {
 
   const back = MeshBuilder.CreateBox(
     `${name}_hpBackMesh`,
-    { width: 0.72, height: 0.08, depth: 0.04 },
+    { width: 0.72, height: 0.16, depth: 0.04 },
     scene,
   );
   back.material = backMaterial;
@@ -64,7 +64,7 @@ export function createHpBar(scene: Scene, name: string): HpBarHandle {
 
   const fill = MeshBuilder.CreateBox(
     `${name}_hpFillMesh`,
-    { width: FILL_HALF_W * 2, height: 0.055, depth: 0.05 },
+    { width: FILL_HALF_W * 2, height: 0.11, depth: 0.05 },
     scene,
   ) as Mesh;
   fill.material = fillMaterial;
