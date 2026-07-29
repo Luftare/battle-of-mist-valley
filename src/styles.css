@@ -145,7 +145,7 @@ body {
 }
 
 .modal-panel {
-  width: min(100%, 22rem);
+  width: min(100%, 24rem);
   max-height: min(78vh, 36rem);
   overflow: auto;
   padding: 1rem 1rem 0.85rem;
@@ -180,7 +180,7 @@ body {
   display: block;
   width: 100%;
   text-align: left;
-  padding: 0.7rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   border-radius: 0.45rem;
   border: 1px solid rgba(180, 200, 160, 0.2);
   background: rgba(8, 14, 10, 0.45);
@@ -202,6 +202,17 @@ body {
   cursor: not-allowed;
 }
 
+.build-card-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.build-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
 .build-card-head {
   display: flex;
   justify-content: space-between;
@@ -219,6 +230,7 @@ body {
   font-weight: 700;
   color: #f0d078;
   font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
 .build-cost::before {
@@ -232,33 +244,141 @@ body {
   vertical-align: -0.05rem;
 }
 
-.build-unit {
-  margin-top: 0.2rem;
-  font-size: 0.78rem;
-  color: rgba(170, 210, 240, 0.9);
+.build-from {
+  margin-top: 0.1rem;
+  font-size: 0.7rem;
+  color: rgba(180, 200, 170, 0.55);
+  letter-spacing: 0.02em;
 }
 
-.build-blurb {
-  margin-top: 0.15rem;
+.build-tag {
+  margin-top: 0.12rem;
   font-size: 0.72rem;
-  color: rgba(220, 230, 215, 0.65);
-  line-height: 1.35;
+  color: rgba(170, 210, 240, 0.9);
+  line-height: 1.3;
 }
 
-.build-card--barracks {
-  border-left: 3px solid #6aa8d8;
+/* —— Product thumbnails —— */
+.thumb {
+  width: 3.25rem;
+  height: 3.25rem;
+  object-fit: contain;
+  border-radius: 0.4rem;
+  background: linear-gradient(
+    165deg,
+    #4a4e54 0%,
+    #6e7278 22%,
+    #3a6b2c 72%,
+    #2f5624 100%
+  );
+  border: 1px solid rgba(180, 200, 160, 0.18);
+  display: block;
+  pointer-events: none;
+  flex-shrink: 0;
 }
-.build-card--depot {
-  border-left: 3px solid #d4a84b;
+
+.thumb--product {
+  border-color: rgba(212, 168, 75, 0.35);
+  box-shadow: 0 0 0 1px rgba(212, 168, 75, 0.08);
 }
-.build-card--factory {
-  border-left: 3px solid #8a9a7a;
+
+.thumb--upgrade {
+  width: 3rem;
+  height: 3rem;
 }
-.build-card--helipad {
-  border-left: 3px solid #d86a6a;
+
+.thumb--empty {
+  background: repeating-linear-gradient(
+    -45deg,
+    rgba(30, 40, 32, 0.6),
+    rgba(30, 40, 32, 0.6) 4px,
+    rgba(50, 65, 52, 0.45) 4px,
+    rgba(50, 65, 52, 0.45) 8px
+  );
 }
-.build-card--researchLab {
-  border-left: 3px solid #7ec8ff;
+
+.thumb--upgrades {
+  display: grid;
+  place-items: center;
+  border-color: rgba(126, 200, 255, 0.4);
+  background: linear-gradient(
+    165deg,
+    #4a4e54 0%,
+    #6e7278 25%,
+    #3a6b2c 70%,
+    #2f5624 100%
+  );
+}
+
+.thumb-upgrades-mark {
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 2px solid #9ee0ff;
+  border-radius: 0.2rem;
+  position: relative;
+  box-shadow: 0 0 10px rgba(126, 200, 255, 0.35);
+}
+
+.thumb-upgrades-mark::before,
+.thumb-upgrades-mark::after {
+  content: "";
+  position: absolute;
+  background: #9ee0ff;
+}
+
+.thumb-upgrades-mark::before {
+  width: 2px;
+  height: 60%;
+  left: 50%;
+  top: 20%;
+  transform: translateX(-50%);
+}
+
+.thumb-upgrades-mark::after {
+  height: 2px;
+  width: 60%;
+  top: 50%;
+  left: 20%;
+  transform: translateY(-50%);
+}
+
+.site-visual {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  margin: 0.65rem 0 0.85rem;
+  padding: 0.85rem 0.75rem;
+  border-radius: 0.5rem;
+  background: rgba(8, 14, 10, 0.4);
+  border: 1px solid rgba(180, 200, 160, 0.15);
+}
+
+.site-visual .thumb--product {
+  width: 4.25rem;
+  height: 4.25rem;
+}
+
+.site-caption {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  color: rgba(220, 230, 215, 0.85);
+}
+
+.site-caption-build {
+  font-weight: 650;
+}
+
+.site-caption-sep {
+  opacity: 0.45;
+  font-size: 0.78em;
+}
+
+.site-caption-unit {
+  color: rgba(170, 210, 240, 0.95);
+  font-weight: 600;
 }
 
 .upgrade-card--active {
@@ -273,7 +393,7 @@ body {
 }
 
 .upgrade-meta {
-  margin-top: 0.2rem;
+  margin-top: 0.15rem;
   font-size: 0.68rem;
   color: rgba(170, 210, 240, 0.75);
   letter-spacing: 0.02em;

@@ -5,6 +5,7 @@ import {
   isMobileDevice,
   MOBILE_TARGET_FPS,
 } from "./platform/mobile";
+import { staticThumbMap } from "./thumbs";
 import { showOnboarding } from "./ui/onboarding";
 
 const canvas = document.getElementById("renderCanvas");
@@ -27,6 +28,8 @@ let loopActive = false;
 let gamePaused = true;
 
 const game = createGameWorld(engine, canvas);
+game.setThumbs(staticThumbMap());
+
 const baseSetPaused = game.setPaused.bind(game);
 game.setPaused = (paused: boolean) => {
   gamePaused = paused;

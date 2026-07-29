@@ -28,6 +28,7 @@ import { createCaptureFlag } from "../buildings/captureFlag";
 import type { CombatEntity } from "./combatEntity";
 import { createHpBar, type HpBarHandle } from "./hpBar";
 import { bypassAroundObstacle, clampToPlayfield, steerToward } from "./pathfinding";
+import type { ThumbMap } from "../thumbs/types";
 import {
   PLAY_WIDTH,
   PLAY_DEPTH,
@@ -108,6 +109,8 @@ const CLICK_DRAG_PX = 12;
 export interface GameWorld {
   scene: Scene;
   setPaused: (paused: boolean) => void;
+  /** Attach baked menu icons (from `bakeThumbnails`). */
+  setThumbs: (thumbs: ThumbMap) => void;
   dispose: () => void;
 }
 
@@ -2031,6 +2034,9 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     scene,
     setPaused: (value: boolean) => {
       paused = value;
+    },
+    setThumbs: (thumbs) => {
+      hud.setThumbs(thumbs);
     },
     dispose: () => {
       canvas.removeEventListener("pointerdown", onPointerDown);

@@ -4,6 +4,8 @@
  * Effects are intentionally strong and expensive mid/late-game investments.
  */
 
+import type { ThumbId } from "../thumbs/types";
+
 export type UpgradeId =
   | "supplySpeed"
   | "infantryAccuracy"
@@ -14,6 +16,19 @@ export type UpgradeId =
   | "tankFireRate"
   | "turretRange"
   | "turretRegen";
+
+/** Which unit/building icon to show on the research card. */
+export const UPGRADE_SUBJECT: Record<UpgradeId, ThumbId> = {
+  supplySpeed: "supplyTruck",
+  infantryAccuracy: "rifleman",
+  tankHp: "tank",
+  heliMissiles: "helicopter",
+  infantryProd: "barracks",
+  tankSplash: "tank",
+  tankFireRate: "tank",
+  turretRange: "turret",
+  turretRegen: "turret",
+};
 
 export interface UpgradeDef {
   id: UpgradeId;
@@ -38,7 +53,7 @@ export const TANK_HP_MUL = 1.5;
 /** Rapid Deployment divides barracks spawn interval. */
 export const INFANTRY_PROD_MUL = 1.4;
 /** Heavy Shells multiplies tank splash radius. */
-export const TANK_SPLASH_MUL = 3;
+export const TANK_SPLASH_MUL = 2;
 /** Autoloaders doubles tank fire rate. */
 export const TANK_FIRE_RATE_MUL = 2;
 /** Extended Optics multiplies turret engagement range. */
@@ -48,7 +63,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   supplySpeed: {
     id: "supplySpeed",
     label: "Logistics Surge",
-    blurb: "Supply trucks mint coins +25% faster. Stacks up to 5×.",
+    blurb: "+25% coin rate from trucks. Stacks ×5.",
     cost: 80,
     durationSec: 20,
     maxLevel: 5,
@@ -57,7 +72,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   infantryAccuracy: {
     id: "infantryAccuracy",
     label: "Marksman Drills",
-    blurb: "Infantry shoot +35% more accurately.",
+    blurb: "Infantry +35% accuracy.",
     cost: 120,
     durationSec: 22,
     maxLevel: 1,
@@ -65,7 +80,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   tankHp: {
     id: "tankHp",
     label: "Reinforced Armor",
-    blurb: "Tanks gain +50% max HP.",
+    blurb: "Tanks +50% max HP.",
     cost: 200,
     durationSec: 24,
     maxLevel: 1,
@@ -73,7 +88,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   heliMissiles: {
     id: "heliMissiles",
     label: "Hellfire Protocol",
-    blurb: "Helicopters unlock missiles vs all vehicles.",
+    blurb: "Helis fire missiles vs vehicles.",
     cost: 200,
     durationSec: 30,
     maxLevel: 1,
@@ -81,7 +96,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   infantryProd: {
     id: "infantryProd",
     label: "Rapid Deployment",
-    blurb: "Barracks produce infantry +40% faster.",
+    blurb: "Barracks +40% spawn rate.",
     cost: 200,
     durationSec: 30,
     maxLevel: 1,
@@ -89,7 +104,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   tankSplash: {
     id: "tankSplash",
     label: "Heavy Shells",
-    blurb: "Tank splash radius is 3× larger.",
+    blurb: "Tank splash ×2.",
     cost: 190,
     durationSec: 25,
     maxLevel: 1,
@@ -105,7 +120,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   turretRange: {
     id: "turretRange",
     label: "Extended Optics",
-    blurb: "Turrets gain +50% engagement range.",
+    blurb: "Turrets +50% range.",
     cost: 120,
     durationSec: 30,
     maxLevel: 1,
@@ -113,7 +128,7 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
   turretRegen: {
     id: "turretRegen",
     label: "Auto-Repair Nanites",
-    blurb: "Turrets rapidly recover HP when no enemy is targeting them.",
+    blurb: "Turrets regen HP out of combat.",
     cost: 100,
     durationSec: 12,
     maxLevel: 1,

@@ -151,12 +151,13 @@ export const UNIT_LABEL: Record<UnitKind, string> = {
   supplyTruck: "Supply Truck",
 };
 
-export const BUILDING_BLURB: Record<BuildingKind, string> = {
-  barracks: "Fast infantry. Strong vs helicopters.",
-  depot: "Spawns supply trucks that mint coins.",
-  factory: "Heavy armor. Strong vs infantry.",
-  researchLab: "Unlock unit upgrades. Does not spawn units.",
-  helipad: "Air support. Strong vs tanks.",
+/** Short combat / role tags for visual menus. */
+export const BUILDING_TAG: Record<BuildingKind, string> = {
+  barracks: "vs helicopters",
+  depot: "+coins while alive",
+  factory: "vs infantry",
+  researchLab: "unlocks upgrades",
+  helipad: "vs tanks",
 };
 
 /** Production buildings only — Research Lab has no unit. */

@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bake-thumbs": "node scripts/bake-thumbs.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "^8.0.0",

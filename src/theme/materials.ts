@@ -30,6 +30,13 @@ export function colorMat(
   return mat;
 }
 
+/** Drop cached mats whose name starts with `prefix` (e.g. after disposing a bake scene). */
+export function purgeMaterialCache(prefix: string): void {
+  for (const key of [...materialCache.keys()]) {
+    if (key.startsWith(prefix)) materialCache.delete(key);
+  }
+}
+
 export function box(
   scene: Scene,
   name: string,

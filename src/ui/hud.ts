@@ -1,18 +1,20 @@
 import type { BuildingKind } from "../buildings/types";
 import {
-  BUILDING_BLURB,
   BUILDING_COST,
   BUILDING_KINDS,
   BUILDING_LABEL,
+  BUILDING_TAG,
   BUILDING_TO_UNIT,
   UNIT_LABEL,
 } from "../game/stats";
 import {
   UPGRADE_DEFS,
   UPGRADE_IDS,
+  UPGRADE_SUBJECT,
   upgradeCost,
   type UpgradeId,
 } from "../game/upgrades";
+import type { ThumbId, ThumbMap } from "../thumbs/types";
 
 export interface UpgradeCardState {
   id: UpgradeId;
@@ -41,6 +43,8 @@ export interface BuildModalOpts {
 
 export interface HudHandle {
   setCoins: (n: number) => void;
+  /** Attach baked unit/building PNG data-URLs for menu icons. */
+  setThumbs: (thumbs: ThumbMap) => void;
   /** Drive the displayed coin tween each frame. */
   update: (dt: number) => void;
   openBuildModal: (opts: BuildModalOpts) => void;
@@ -58,6 +62,28 @@ export interface HudHandle {
   dispose: () => void;
 }
 
+function thumbImg(src: string | undefined, cls: string, label: string): string {
+  if (!src) {
+    return `<span class="thumb thumb--empty ${cls}" aria-hidden="true"></span>`;
+  }
+  return `<img class="thumb ${cls}" src="${src}" alt="${label}" draggable="false" />`;
+}
+
+function productLabel(product: ThumbId): string {
+  if (product === "turret") return "Turret";
+  if (product in UNIT_LABEL) return UNIT_LABEL[product as keyof typeof UNIT_LABEL];
+  if (product in BUILDING_LABEL) return BUILDING_LABEL[product as BuildingKind];
+  return product;
+}
+
+/** Unit thumbnail only — lab shows an upgrades glyph. */
+function productThumb(thumbs: ThumbMap, product: ThumbId | null): string {
+  if (!product) {
+    return `<span class="thumb thumb--product thumb--upgrades" title="Upgrades" aria-hidden="true"><span class="thumb-upgrades-mark"></span></span>`;
+  }
+  return thumbImg(thumbs[product], "thumb--product", productLabel(product));
+}
+
 /**
  * DOM HUD: coin counter, build/collapse/research modal, victory / defeat overlay.
  */
@@ -73,7 +99,7 @@ export function createHud(): HudHandle {
   top.innerHTML = `
     <div class="hud-brand">
       <h1>Mist Valley</h1>
-      <p>Tap your platforms to build · Research Lab unlocks upgrades</p>
+      <p>Tap platforms to build · icons show what you get</p>
     </div>
     <div class="hud-coins" id="hudCoins" aria-live="polite">
       <span class="coin-icon" aria-hidden="true"></span>
@@ -112,6 +138,7 @@ export function createHud(): HudHandle {
   let researchCards: HTMLButtonElement[] = [];
   let modalMode: "build" | "site" | "research" | null = null;
   let toastTimer = 0;
+  let thumbs: ThumbMap = {};
 
   function closeModal(): void {
     modalHost.hidden = true;
@@ -141,6 +168,8 @@ export function createHud(): HudHandle {
     const done = u.level >= u.maxLevel;
     const levelTag =
       u.maxLevel > 1 ? ` · ${u.level}/${u.maxLevel}` : u.level > 0 ? " · Done" : "";
+    const subject = UPGRADE_SUBJECT[u.id];
+    const subjectSrc = thumbs[subject];
 
     let status = "";
     if (u.researching && u.progress !== null) {
@@ -159,14 +188,23 @@ export function createHud(): HudHandle {
     }`;
     card.disabled =
       done || u.researching || u.blocked || modalCoins < u.cost;
+    card.setAttribute(
+      "aria-label",
+      `${def.label}${levelTag}, ${done ? "unlocked" : `${u.cost} coins`}, ${def.blurb}`,
+    );
     card.innerHTML = `
-      <div class="build-card-head">
-        <span class="build-name">${def.label}${levelTag}</span>
-        <span class="build-cost">${done ? "—" : u.cost}</span>
+      <div class="build-card-row">
+        ${thumbImg(subjectSrc, "thumb--upgrade", def.label)}
+        <div class="build-card-body">
+          <div class="build-card-head">
+            <span class="build-name">${def.label}${levelTag}</span>
+            <span class="build-cost">${done ? "—" : u.cost}</span>
+          </div>
+          <div class="build-tag">${def.blurb}</div>
+          <div class="upgrade-meta">${def.durationSec}s</div>
+          ${status}
+        </div>
       </div>
-      <div class="build-blurb">${def.blurb}</div>
-      <div class="upgrade-meta">${def.durationSec}s research</div>
-      ${status}
     `;
   }
 
@@ -231,6 +269,10 @@ export function createHud(): HudHandle {
       targetCoins = next;
       if (!modalHost.hidden && modalMode === "build") applyBuildAfford(next);
     },
+    setThumbs: (next) => {
+      thumbs = next;
+      root.dataset.thumbsReady = String(Object.keys(next).length);
+    },
     update: (dt) => {
       const diff = targetCoins - displayCoins;
       if (Math.abs(diff) < 0.05) {
@@ -278,17 +320,12 @@ export function createHud(): HudHandle {
       title.textContent = isLab
         ? "Research Lab"
         : opts.occupied
-          ? "Site occupied"
-          : "Build on site";
+          ? "This site"
+          : "Build";
       panel.appendChild(title);
 
       if (isLab && opts.upgrades && opts.onResearch) {
         modalMode = "research";
-
-        const info = document.createElement("p");
-        info.className = "modal-sub";
-        info.textContent = "Pick an upgrade — one project at a time.";
-        panel.appendChild(info);
 
         const list = document.createElement("div");
         list.className = "build-list";
@@ -333,12 +370,19 @@ export function createHud(): HudHandle {
       } else if (opts.occupied) {
         modalMode = "site";
         const unit = BUILDING_TO_UNIT[opts.occupied];
-        const info = document.createElement("p");
-        info.className = "modal-sub";
-        info.textContent = unit
-          ? `${BUILDING_LABEL[opts.occupied]} · produces ${UNIT_LABEL[unit]}`
-          : BUILDING_LABEL[opts.occupied];
-        panel.appendChild(info);
+        const siteVisual = document.createElement("div");
+        siteVisual.className = "site-visual";
+        siteVisual.innerHTML = `
+          ${productThumb(thumbs, unit ?? null)}
+          <p class="site-caption">
+            ${
+              unit
+                ? `<span class="site-caption-unit">${UNIT_LABEL[unit]}</span><span class="site-caption-sep">from</span><span class="site-caption-build">${BUILDING_LABEL[opts.occupied]}</span>`
+                : `<span class="site-caption-build">${BUILDING_LABEL[opts.occupied]}</span>`
+            }
+          </p>
+        `;
+        panel.appendChild(siteVisual);
 
         const collapseBtn = document.createElement("button");
         collapseBtn.type = "button";
@@ -360,21 +404,29 @@ export function createHud(): HudHandle {
 
         for (const kind of BUILDING_KINDS) {
           const cost = BUILDING_COST[kind];
-          const unit = BUILDING_TO_UNIT[kind];
+          const unit = BUILDING_TO_UNIT[kind] ?? null;
+          const productLabel = unit ? UNIT_LABEL[unit] : "Upgrades";
           const card = document.createElement("button");
           card.type = "button";
           card.className = `build-card build-card--${kind}`;
           card.dataset.cost = String(cost);
           card.disabled = modalCoins < cost;
+          card.setAttribute(
+            "aria-label",
+            `${BUILDING_LABEL[kind]}, ${cost} coins, produces ${productLabel}, ${BUILDING_TAG[kind]}`,
+          );
           card.innerHTML = `
-            <div class="build-card-head">
-              <span class="build-name">${BUILDING_LABEL[kind]}</span>
-              <span class="build-cost">${cost}</span>
+            <div class="build-card-row">
+              ${productThumb(thumbs, unit)}
+              <div class="build-card-body">
+                <div class="build-card-head">
+                  <span class="build-name">${unit ? UNIT_LABEL[unit] : BUILDING_LABEL[kind]}</span>
+                  <span class="build-cost">${cost}</span>
+                </div>
+                <div class="build-from">${BUILDING_LABEL[kind]}</div>
+                <div class="build-tag">${BUILDING_TAG[kind]}</div>
+              </div>
             </div>
-            <div class="build-unit">${
-              unit ? `Produces ${UNIT_LABEL[unit]}` : "Unlocks upgrades"
-            }</div>
-            <div class="build-blurb">${BUILDING_BLURB[kind]}</div>
           `;
           card.addEventListener("click", () => {
             if (modalCoins < cost) return;
