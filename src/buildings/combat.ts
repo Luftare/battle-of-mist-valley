@@ -1,13 +1,20 @@
-import { Vector3, type TransformNode } from "@babylonjs/core";
+import { TransformNode, Vector3 } from "@babylonjs/core";
+import { spawnExplosion } from "../fx/explosion";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 import {
   BUILD_DURATION_SEC,
   BUILDING_MAX_HP,
-  COLLAPSE_DURATION_SEC,
   CORPSE_LIFETIME_SEC,
   type UnitKind,
 } from "../game/stats";
 import type { Team } from "../theme/colors";
+import {
+  makeDebris,
+  randRange,
+  randSpin,
+  stepDebris,
+  type DebrisPiece,
+} from "../units/debris";
 import type { BuildingHandle, BuildingKind } from "./types";
 
 interface BuildingCombatOpts {
@@ -19,8 +26,17 @@ interface BuildingCombatOpts {
   disposeVisuals: () => void;
 }
 
+/** How deep pieces dig once sinking. */
+const DEBRIS_SINK_DEPTH = 2.2;
+/** Max wait for bounce settle before forcing the bury phase. */
+const DEBRIS_SINK_MAX_WAIT_SEC = 2.8;
+/** Brief pause on the ground after settle before burying. */
+const DEBRIS_SINK_GROUND_HOLD_SEC = 0.45;
+
 /**
- * Adds HP, construction, destruction sink, owner collapse, and CombatEntity methods.
+ * Adds HP, construction, explosive destruction, owner collapse, and CombatEntity methods.
+ * Combat death and owner collapse both instant-blow the structure into flying chunks
+ * that later sink — same language as wrecked tanks / helis.
  */
 export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
   const maxHp = BUILDING_MAX_HP;
@@ -31,8 +47,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
   let buildAge = 0;
   let buildSettled = false;
   let expired = false;
-  let sinkAge = 0;
-  let collapseAge = 0;
+  let wreckAge = 0;
   let baseY = opts.root.position.y;
   let baseScale = opts.root.scaling.x;
   /** How far below grade the building starts while erecting. */
@@ -40,14 +55,127 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
   const hitPoint = new Vector3();
   let shake = 0;
   let smoke: WreckSmokeHandle | null = null;
+  const debris: DebrisPiece[] = [];
+  /** Fixed footprint node so smoke stays where the building stood. */
+  let wreckAnchor: TransformNode | null = null;
+  const sinkBaseY = new Map<DebrisPiece, number>();
+  let sinking = false;
+  let settledHold = 0;
+  let sinkStartAge = 0;
+  /** World-space ground under the building footprint. */
+  let groundY = 0.06;
 
-  function startWreckSmoke(): void {
+  function startWreckSmoke(at: Vector3): void {
     if (smoke) return;
-    smoke = createWreckSmoke(opts.root.getScene(), opts.root, {
-      rate: 42,
-      scale: 1.45,
+    const scene = opts.root.getScene();
+    wreckAnchor = new TransformNode(`${opts.root.name}_wreck`, scene);
+    wreckAnchor.position.copyFrom(at);
+    wreckAnchor.position.y = Math.max(groundY + 0.2, at.y * 0.35 + groundY);
+    smoke = createWreckSmoke(scene, wreckAnchor, {
+      rate: 36,
+      scale: 1.25,
     });
     smoke.start();
+  }
+
+  function collectBlastPieces(): TransformNode[] {
+    const pieces: TransformNode[] = [];
+    for (const child of opts.root.getChildren()) {
+      if (!(child instanceof TransformNode)) continue;
+      const n = child.name.toLowerCase();
+      if (n.includes("shadow") || n.includes("blob")) continue;
+      pieces.push(child);
+    }
+    return pieces;
+  }
+
+  /** Soft pop: pieces nudge apart, land nearby, then bury — tiny flash only. */
+  function explode(): void {
+    const scene = opts.root.getScene();
+    const origin = opts.root.getAbsolutePosition().clone();
+    baseY = opts.root.position.y;
+    groundY = baseY + 0.04;
+    origin.y = groundY + 0.55;
+
+    const pieces = collectBlastPieces();
+    for (let i = 0; i < pieces.length; i++) {
+      const piece = pieces[i];
+      // Mostly sideways scatter; barely any loft so chunks land quickly
+      const yaw = Math.random() * Math.PI * 2;
+      const outward = randRange(0.55, 1.65);
+      const up = randRange(0.35, 1.15);
+      debris.push(
+        makeDebris(
+          piece,
+          new Vector3(
+            Math.cos(yaw) * outward,
+            up,
+            Math.sin(yaw) * outward,
+          ),
+          randSpin(1.2, 4.5),
+        ),
+      );
+    }
+
+    spawnExplosion(scene, origin, {
+      scale: 0.45 + randRange(0, 0.12),
+      duration: 0.28,
+    });
+
+    opts.root.scaling.setAll(baseScale);
+    opts.root.rotation.x = 0;
+    opts.root.rotation.z = 0;
+
+    startWreckSmoke(origin);
+    wreckAge = 0;
+    sinking = false;
+    settledHold = 0;
+    sinkStartAge = 0;
+  }
+
+  function stepWreck(dt: number): void {
+    wreckAge += dt;
+
+    if (!sinking) {
+      stepDebris(debris, dt, groundY, 18);
+
+      const allDown =
+        debris.length === 0 || debris.every((p) => p.settled);
+      if (allDown) settledHold += dt;
+      else settledHold = 0;
+
+      if (
+        settledHold >= DEBRIS_SINK_GROUND_HOLD_SEC ||
+        wreckAge >= DEBRIS_SINK_MAX_WAIT_SEC
+      ) {
+        sinking = true;
+        sinkStartAge = wreckAge;
+        for (const p of debris) {
+          // Never bury from mid-air — pin to the footprint ground first
+          if (p.node.position.y > groundY + 0.02) {
+            p.node.position.y = groundY;
+          }
+          p.settled = true;
+          p.vel.setAll(0);
+          p.angVel.scaleInPlace(0.15);
+          sinkBaseY.set(p, p.node.position.y);
+        }
+      }
+    } else {
+      const sinkT = Math.min(
+        1,
+        (wreckAge - sinkStartAge) /
+          Math.max(0.5, CORPSE_LIFETIME_SEC - sinkStartAge),
+      );
+      const eased = sinkT * sinkT * (3 - 2 * sinkT);
+      for (const p of debris) {
+        const by = sinkBaseY.get(p) ?? groundY;
+        p.node.position.y = by - eased * DEBRIS_SINK_DEPTH;
+      }
+    }
+
+    smoke?.update();
+    if (wreckAge >= CORPSE_LIFETIME_SEC) expired = true;
   }
 
   return {
@@ -80,50 +208,30 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
       return p;
     },
     applyImpact: (_fromX, _fromZ, strength) => {
-      if (collapsing || constructing) return;
+      if (destroyed || constructing) return;
       shake = Math.min(0.35, shake + strength * 0.04);
     },
     takeDamage: (amount) => {
-      if (destroyed || collapsing || amount <= 0) return;
+      if (destroyed || amount <= 0) return;
       hp = Math.max(0, hp - amount);
       if (hp <= 0) {
         destroyed = true;
         constructing = false;
-        sinkAge = 0;
-        startWreckSmoke();
+        explode();
       }
     },
     beginCollapse: () => {
       if (destroyed || collapsing || expired) return;
       collapsing = true;
       constructing = false;
-      collapseAge = 0;
-      // Stop counting as a living structure for combat / win checks
       destroyed = true;
       hp = 0;
-      startWreckSmoke();
+      // Instant demolition — no slow shrink teardown
+      explode();
     },
     update: (dt, time) => {
-      if (collapsing) {
-        collapseAge += dt;
-        const t = Math.min(1, collapseAge / COLLAPSE_DURATION_SEC);
-        // Tear down: sink + shrink + wobble
-        opts.root.position.y = baseY - t * 1.6;
-        const s = baseScale * (1 - t * 0.85);
-        opts.root.scaling.setAll(s);
-        opts.root.rotation.z = Math.sin(time * 18) * 0.08 * (1 - t);
-        opts.root.rotation.x = Math.cos(time * 14) * 0.05 * (1 - t);
-        smoke?.update();
-        if (collapseAge >= COLLAPSE_DURATION_SEC) expired = true;
-        return;
-      }
-
       if (destroyed) {
-        sinkAge += dt;
-        const t = Math.min(1, sinkAge / CORPSE_LIFETIME_SEC);
-        opts.root.position.y = baseY - t * 2.4;
-        smoke?.update();
-        if (sinkAge >= CORPSE_LIFETIME_SEC) expired = true;
+        stepWreck(dt);
         return;
       }
 
@@ -160,6 +268,10 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
     dispose: () => {
       smoke?.dispose();
       smoke = null;
+      wreckAnchor?.dispose();
+      wreckAnchor = null;
+      for (const d of debris) d.node.dispose(false, true);
+      debris.length = 0;
       opts.disposeVisuals();
     },
   };

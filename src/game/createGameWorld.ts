@@ -312,6 +312,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   const captureFlag = createCaptureFlag(scene, terrain.getGroundYAt);
   const agents: Agent[] = [];
   const slots: Slot[] = [];
+  /** Collapsed wrecks still animating after the pad was freed for rebuild. */
+  const wrecks: BuildingHandle[] = [];
   const turrets: TurretHandle[] = [];
   const turretHpBars: HpBarHandle[] = [];
   const hud = createHud();
@@ -672,7 +674,22 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     if (!b || b.destroyed || b.collapsing) return false;
     if (livingBuildings(slot.team).length <= 1) return false;
     b.beginCollapse();
+    noteBuildingDeath(b);
+    // Free the brown pad immediately — wreck keeps animating off-slot
+    freePadKeepWreck(slot);
     return true;
+  }
+
+  /** Detach a collapsing/destroyed building from its pad so rebuild can start. */
+  function freePadKeepWreck(slot: Slot): void {
+    const b = slot.building;
+    if (!b) return;
+    wrecks.push(b);
+    slot.hpBar?.dispose();
+    slot.hpBar = null;
+    slot.building = null;
+    slot.spawnCooldown = 0;
+    slot.platform.setSiteVisible(true);
   }
 
   function clearExpiredBuilding(slot: Slot): void {
@@ -1939,6 +1956,15 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       }
     }
 
+    for (let i = wrecks.length - 1; i >= 0; i--) {
+      const wreck = wrecks[i];
+      wreck.update(dt, elapsed);
+      if (wreck.expired) {
+        wreck.dispose();
+        wrecks.splice(i, 1);
+      }
+    }
+
     if (gameOver) {
       // Freeze living combatants — no moves, aims, or shots
       for (const agent of agents) {
@@ -2057,6 +2083,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
         slot.pickProxy.dispose();
         slot.platform.dispose();
       }
+      for (const wreck of wrecks) wreck.dispose();
+      wrecks.length = 0;
       for (let i = 0; i < turrets.length; i++) {
         turretHpBars[i].dispose();
         turrets[i].dispose();
