@@ -1,7 +1,8 @@
 /**
  * Research Lab tech tree — team-wide upgrades unlocked over time.
- * Durations sit between 5–20s; Logistics Surge and Rapid Deployment stack (×5).
- * Effects are intentionally strong and expensive mid/late-game investments.
+ * Durations sit between 5–20s; Logistics Surge, Rapid Deployment, and
+ * Rotary Feed stack (×5). Effects are intentionally strong and expensive
+ * mid/late-game investments.
  */
 
 import type { ThumbId } from "../thumbs/types";
@@ -11,6 +12,7 @@ export type UpgradeId =
   | "infantryAccuracy"
   | "tankHp"
   | "heliMissiles"
+  | "heliGunFireRate"
   | "infantryProd"
   | "tankSplash"
   | "tankFireRate"
@@ -23,6 +25,7 @@ export const UPGRADE_SUBJECT: Record<UpgradeId, ThumbId> = {
   infantryAccuracy: "rifleman",
   tankHp: "tank",
   heliMissiles: "helicopter",
+  heliGunFireRate: "helicopter",
   infantryProd: "rifleman",
   tankSplash: "tank",
   tankFireRate: "tank",
@@ -61,11 +64,22 @@ export const TANK_SPLASH_MUL = 2;
 export const TANK_FIRE_RATE_MUL = 2;
 /** Extended Optics multiplies turret engagement range. */
 export const TURRET_RANGE_MUL = 1.5;
+/**
+ * Rotary Feed: +15% heli chin-gun fire rate per level (stacks additively).
+ * Level 5 → 1.75× original gun cadence.
+ */
+export const HELI_GUN_FIRE_RATE_BONUS_PER_LEVEL = 0.15;
 
 /** Barracks spawn-rate multiplier from Rapid Deployment stacks (1 at level 0). */
 export function infantryProdMul(level: number): number {
   if (level <= 0) return 1;
   return 1 + INFANTRY_PROD_BONUS_PER_LEVEL * level;
+}
+
+/** Heli chin-gun fire-rate multiplier from Rotary Feed stacks (1 at level 0). */
+export function heliGunFireRateMul(level: number): number {
+  if (level <= 0) return 1;
+  return 1 + HELI_GUN_FIRE_RATE_BONUS_PER_LEVEL * level;
 }
 
 export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
@@ -101,6 +115,15 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
     cost: 200,
     durationSec: 30,
     maxLevel: 1,
+  },
+  heliGunFireRate: {
+    id: "heliGunFireRate",
+    label: "Rotary Feed",
+    blurb: "+15% heli gun fire rate.",
+    cost: 110,
+    durationSec: 16,
+    maxLevel: 5,
+    costPerLevel: 45,
   },
   infantryProd: {
     id: "infantryProd",
@@ -158,6 +181,7 @@ export const UPGRADE_IDS: UpgradeId[] = [
   "tankFireRate",
   // Helicopter
   "heliMissiles",
+  "heliGunFireRate",
   // Turret
   "turretRange",
   "turretRegen",
@@ -178,6 +202,7 @@ export function createTeamTechLevels(): Record<UpgradeId, number> {
     infantryAccuracy: 0,
     tankHp: 0,
     heliMissiles: 0,
+    heliGunFireRate: 0,
     infantryProd: 0,
     tankSplash: 0,
     tankFireRate: 0,

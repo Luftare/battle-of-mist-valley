@@ -40,6 +40,7 @@ import {
   SPAWN_INTERVAL_SEC,
   FACTORY_SPAWN_INTERVAL_SEC,
   HELI_GUN_DAMAGE,
+  HELI_GUN_FIRE_HZ,
   HELI_GUN_RANGE,
   TANK_SPLASH_RADIUS,
   MISSILE_SPLASH_RADIUS,
@@ -62,6 +63,7 @@ import {
 import { createAiBrain, type AiSlotView, type AiSnapshot } from "./aiStrategy";
 import {
   createTeamTechLevels,
+  heliGunFireRateMul,
   INFANTRY_ACCURACY_MUL,
   infantryProdMul,
   SUPPLY_SPEED_BONUS_PER_LEVEL,
@@ -515,11 +517,26 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     return techLevels[team].tankFireRate > 0 ? base * TANK_FIRE_RATE_MUL : base;
   }
 
+  function heliChinGunFireRateHz(team: Team): number {
+    return HELI_GUN_FIRE_HZ * heliGunFireRateMul(techLevels[team].heliGunFireRate);
+  }
+
   function applyUpgradeEffect(team: Team, id: UpgradeId): void {
     if (id === "heliMissiles") {
       for (const agent of agents) {
         if (agent.unit.team === team && agent.unit.kind === "helicopter") {
           agent.unit.setMissilesEnabled(true);
+        }
+      }
+    }
+    if (id === "heliGunFireRate") {
+      for (const agent of agents) {
+        if (
+          agent.unit.team === team &&
+          agent.unit.kind === "helicopter" &&
+          !agent.unit.destroyed
+        ) {
+          agent.unit.fireRateHz = heliChinGunFireRateHz(team);
         }
       }
     }
@@ -913,7 +930,11 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     unit.root.rotation.y = towardEnemy > 0 ? 0 : Math.PI;
     unit.root.scaling.setAll(0.8);
     unit.fireRateHz =
-      kind === "tank" ? tankFireRateHz(b.team) : UNIT_STATS[kind].fireRateHz;
+      kind === "tank"
+        ? tankFireRateHz(b.team)
+        : kind === "helicopter"
+          ? heliChinGunFireRateHz(b.team)
+          : UNIT_STATS[kind].fireRateHz;
 
     if (kind === "tank" && techLevels[b.team].tankHp > 0) {
       unit.applyMaxHpBonus(TANK_HP_MUL);

@@ -386,7 +386,7 @@ function createSupplyRush(variant: SupplyVariant): AiBrain {
     const tech = researchPriority(
       snap,
       variant === "logistics"
-        ? ["supplySpeed", "heliMissiles", "tankFireRate", "tankHp", "tankSplash"]
+        ? ["supplySpeed", "heliMissiles", "heliGunFireRate", "tankFireRate", "tankHp", "tankSplash"]
         : upgradeOrder,
     );
     // Logistics variant stacks supply aggressively
@@ -509,6 +509,7 @@ function createInfantryHeli(): AiBrain {
     (snap, state) => {
       const tech = researchPriority(snap, [
         "heliMissiles",
+        "heliGunFireRate",
         "infantryAccuracy",
         "infantryProd",
         "turretRange",
@@ -577,6 +578,7 @@ function createBalanced(): AiBrain {
     (snap, state) => {
       const tech = researchPriority(snap, [
         "heliMissiles",
+        "heliGunFireRate",
         "tankFireRate",
         "infantryAccuracy",
         "supplySpeed",
@@ -646,7 +648,7 @@ function createAllInProducer(
     Math.floor(Math.random() * 80);
   const upgrades: UpgradeId[] = isTanks
     ? ["tankFireRate", "tankHp", "tankSplash", "turretRange", "turretRegen"]
-    : ["heliMissiles", "turretRange", "turretRegen", "tankFireRate"];
+    : ["heliMissiles", "heliGunFireRate", "turretRange", "turretRegen", "tankFireRate"];
 
   return makeBrain(id, label, (snap, state) => {
     const tech = researchPriority(snap, upgrades);

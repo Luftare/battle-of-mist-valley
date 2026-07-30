@@ -182,7 +182,8 @@ export function createHelicopter(
   let moving = false;
   let missilesEnabled = false;
   let fireCooldown = 0;
-  let fireRateHz = HELI_MISSILE_HZ;
+  /** Chin-gun cadence; missiles always use HELI_MISSILE_HZ. */
+  let fireRateHz = HELI_GUN_FIRE_HZ;
   let nextPod = 0;
   let flashTimer = 0;
   let flashSide: 0 | 1 = 0;
@@ -472,7 +473,7 @@ export function createHelicopter(
             fireCooldown = 1 / HELI_MISSILE_HZ;
             launchMissile();
           } else {
-            fireCooldown = 1 / HELI_GUN_FIRE_HZ;
+            fireCooldown = 1 / fireRateHz;
             fireChinGun();
           }
         }

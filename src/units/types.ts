@@ -8,7 +8,7 @@ export interface UnitHandle extends CombatEntity {
   kind: string;
   /**
    * Shots per second while in combat.
-   * Rifleman 2; tank 0.25 once aimed; helicopter 0.2 (missile every 5s).
+   * Rifleman 2; tank 0.25 once aimed; helicopter chin gun (missiles use a fixed rate).
    */
   fireRateHz: number;
   hp: number;
