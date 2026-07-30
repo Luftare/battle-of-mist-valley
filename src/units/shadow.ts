@@ -45,7 +45,8 @@ let shadowMat: StandardMaterial | null = null;
 let shadowUpdateTick = 0;
 
 function getShadowMaterial(scene: Scene): StandardMaterial {
-  if (shadowMat) return shadowMat;
+  // Module singleton must not outlive its scene (title → match dispose).
+  if (shadowMat?.getScene() === scene) return shadowMat;
   shadowMat = new StandardMaterial("blobShadow", scene);
   shadowMat.diffuseColor = new Color3(0.05, 0.07, 0.04);
   shadowMat.emissiveColor = new Color3(0, 0, 0);

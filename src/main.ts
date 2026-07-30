@@ -1,17 +1,22 @@
 import { Engine } from "@babylonjs/core";
-import { createGameWorld } from "./game/createGameWorld";
+import { createGameWorld, type GameWorld } from "./game/createGameWorld";
+import { createOnboardingWorld } from "./game/createOnboardingWorld";
 import {
   applyMobilePixelCap,
   isMobileDevice,
   MOBILE_TARGET_FPS,
 } from "./platform/mobile";
 import { staticThumbMap } from "./thumbs";
+import { showBuildIntro } from "./ui/buildIntro";
 import { showOnboarding } from "./ui/onboarding";
 
 const canvas = document.getElementById("renderCanvas");
 if (!(canvas instanceof HTMLCanvasElement)) {
   throw new Error("Missing #renderCanvas");
 }
+
+const hudEl = document.getElementById("hud");
+if (hudEl) hudEl.hidden = true;
 
 const isMobile = isMobileDevice();
 const engine = new Engine(canvas, !isMobile, {
@@ -26,23 +31,16 @@ if (isMobile) engine.maxFPS = MOBILE_TARGET_FPS;
 
 let loopActive = false;
 let gamePaused = true;
-
-const game = createGameWorld(engine, canvas);
-game.setThumbs(staticThumbMap());
-
-const baseSetPaused = game.setPaused.bind(game);
-game.setPaused = (paused: boolean) => {
-  gamePaused = paused;
-  baseSetPaused(paused);
-  if (paused) stopRenderLoop();
-  else startRenderLoop();
-};
+let activeScene: { render: () => void } | null = null;
+let game: GameWorld | null = null;
 
 function startRenderLoop(): void {
-  if (loopActive || document.hidden || gamePaused) return;
+  if (loopActive || document.hidden) return;
+  if (game && gamePaused) return;
+  if (!activeScene) return;
   loopActive = true;
   engine.runRenderLoop(() => {
-    game.scene.render();
+    activeScene?.render();
   });
 }
 
@@ -52,10 +50,38 @@ function stopRenderLoop(): void {
   engine.stopRenderLoop();
 }
 
-game.setPaused(true);
+const onboarding = createOnboardingWorld(engine, canvas);
+activeScene = onboarding.scene;
+gamePaused = false; // onboarding always renders
+startRenderLoop();
 
 showOnboarding({
-  onDismiss: () => game.setPaused(false),
+  onDismiss: () => {
+    stopRenderLoop();
+    onboarding.dispose();
+
+    game = createGameWorld(engine, canvas);
+    game.setThumbs(staticThumbMap());
+    game.beginIntro();
+    activeScene = game.scene;
+
+    const baseSetPaused = game.setPaused.bind(game);
+    game.setPaused = (paused: boolean) => {
+      gamePaused = paused;
+      baseSetPaused(paused);
+      if (paused) stopRenderLoop();
+      else startRenderLoop();
+    };
+
+    if (hudEl) hudEl.hidden = false;
+    game.setPaused(false);
+
+    showBuildIntro({
+      onConfirm: () => {
+        game?.confirmIntro();
+      },
+    });
+  },
 });
 
 const onResize = () => {
@@ -72,5 +98,5 @@ document.addEventListener("visibilitychange", () => {
 
 window.addEventListener("pagehide", stopRenderLoop);
 window.addEventListener("pageshow", () => {
-  if (!gamePaused) startRenderLoop();
+  if (!game || !gamePaused) startRenderLoop();
 });

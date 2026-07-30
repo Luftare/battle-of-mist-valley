@@ -1,39 +1,100 @@
+import { missionBriefMapSvg } from "./missionBriefMap";
+
 /**
- * Shown at every game start: short objective tip, then unpause play.
+ * Two-step title flow over the hill close-up:
+ * 1) Welcome + PLAY
+ * 2) Mission brief map + typed objective → continue into the match
  */
 export function showOnboarding(opts: { onDismiss: () => void }): void {
   const host = document.createElement("div");
   host.id = "onboardingHost";
   host.className = "onboard-host";
-  host.innerHTML = `
-    <div class="onboard-panel" role="dialog" aria-labelledby="onboardTitle">
-      <div class="onboard-glow" aria-hidden="true"></div>
-      <p class="onboard-kicker onboard-stagger" style="--d:0">Welcome to</p>
-      <h1 id="onboardTitle" class="onboard-stagger" style="--d:1">Mist Valley</h1>
-      <p class="onboard-subtitle onboard-stagger" style="--d:2">Auto-battler</p>
-      <div class="onboard-objective-wrap onboard-stagger" style="--d:3">
-        <p class="onboard-objective">Destroy the enemy base.</p>
-      </div>
-      <p class="onboard-tip onboard-stagger" style="--d:4">
-        Tap a platform on your side to build. Units fight on their own.
-      </p>
-      <button type="button" class="btn btn-primary onboard-go onboard-stagger" style="--d:5" id="onboardGo">
-        Got it, play!
-      </button>
-    </div>
-  `;
   document.body.appendChild(host);
 
-  const go = document.getElementById("onboardGo");
-  go?.addEventListener(
-    "click",
-    () => {
-      host.classList.add("onboard-host--out");
-      window.setTimeout(() => {
-        host.remove();
-        opts.onDismiss();
-      }, 280);
-    },
-    { once: true },
-  );
+  const fadeSwap = (next: () => void) => {
+    host.classList.add("onboard-host--swap");
+    window.setTimeout(() => {
+      next();
+      host.classList.remove("onboard-host--swap");
+    }, 220);
+  };
+
+  const showWelcome = () => {
+    host.innerHTML = `
+      <div class="onboard-panel" role="dialog" aria-labelledby="onboardTitle">
+        <h1 id="onboardTitle" class="onboard-stagger" style="--d:0">Mist Valley</h1>
+        <p class="onboard-subtitle onboard-stagger" style="--d:1">Auto-battler</p>
+        <p class="onboard-desc onboard-stagger" style="--d:2">
+          Build your base and counter the enemy forces.
+        </p>
+        <button type="button" class="btn btn-primary onboard-go onboard-stagger" style="--d:3" id="onboardGo">
+          PLAY
+        </button>
+      </div>
+    `;
+    document.getElementById("onboardGo")?.addEventListener(
+      "click",
+      () => fadeSwap(showBrief),
+      { once: true },
+    );
+  };
+
+  const showBrief = () => {
+    host.innerHTML = `
+      <div class="onboard-panel onboard-panel--brief" role="dialog" aria-labelledby="onboardBriefKicker">
+        <p id="onboardBriefKicker" class="onboard-kicker onboard-stagger" style="--d:0">Mission brief</p>
+        <div class="brief-map brief-map--large onboard-stagger" style="--d:1">
+          ${missionBriefMapSvg()}
+        </div>
+        <p id="onboardBrief" class="onboard-mission onboard-stagger" style="--d:2" aria-live="polite">
+          <span id="onboardBriefText"></span><span class="onboard-cursor" id="onboardCursor" aria-hidden="true">▌</span>
+        </p>
+        <button type="button" class="btn btn-primary onboard-go" id="onboardContinue" hidden>
+          CONTINUE
+        </button>
+      </div>
+    `;
+
+    const briefEl = document.getElementById("onboardBriefText");
+    const cursorEl = document.getElementById("onboardCursor");
+    const go = document.getElementById("onboardContinue") as HTMLButtonElement | null;
+    const fullBrief =
+      "Destroy the enemy base. Control the hill for extra resources.";
+    let i = 0;
+
+    const typeNext = () => {
+      if (!briefEl) return;
+      if (i >= fullBrief.length) {
+        cursorEl?.classList.add("onboard-cursor--done");
+        if (go) {
+          go.hidden = false;
+          go.classList.add("onboard-stagger");
+          go.style.setProperty("--d", "0");
+        }
+        return;
+      }
+      briefEl.textContent = fullBrief.slice(0, i + 1);
+      i += 1;
+      const ch = fullBrief[i - 1];
+      const delay =
+        ch === ":" ? 220 : ch === "." ? 200 : ch === " " ? 36 : 28;
+      window.setTimeout(typeNext, delay);
+    };
+
+    window.setTimeout(typeNext, 480);
+
+    go?.addEventListener(
+      "click",
+      () => {
+        host.classList.add("onboard-host--out");
+        window.setTimeout(() => {
+          host.remove();
+          opts.onDismiss();
+        }, 280);
+      },
+      { once: true },
+    );
+  };
+
+  showWelcome();
 }

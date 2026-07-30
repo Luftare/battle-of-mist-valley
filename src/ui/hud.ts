@@ -16,6 +16,7 @@ import {
   type UpgradeId,
 } from "../game/upgrades";
 import type { ThumbId, ThumbMap } from "../thumbs/types";
+import { closeHillBriefModal, showHillBriefModal } from "./hillBriefModal";
 
 export interface UpgradeCardState {
   id: UpgradeId;
@@ -100,22 +101,25 @@ export function createHud(): HudHandle {
   const top = document.createElement("div");
   top.className = "hud-top";
   top.innerHTML = `
-    <div
+    <button
+      type="button"
       class="hud-flag hud-flag--neutral"
       id="hudFlag"
-      role="status"
-      aria-live="polite"
-      aria-label="Hill unclaimed"
+      aria-label="Hill unclaimed — tap for details"
     >
       <span class="hud-flag-cloth" aria-hidden="true"></span>
       <span class="hud-flag-label" id="hudFlagLabel">Hill</span>
-    </div>
+    </button>
     <div class="hud-coins" id="hudCoins" aria-live="polite">
       <span class="coin-icon" aria-hidden="true"></span>
       <span class="coin-value" id="hudCoinValue">0</span>
     </div>
   `;
   root.appendChild(top);
+
+  document.getElementById("hudFlag")?.addEventListener("click", () => {
+    showHillBriefModal();
+  });
 
   const toastHost = document.createElement("div");
   toastHost.id = "upgradeToastHost";
@@ -285,15 +289,15 @@ export function createHud(): HudHandle {
       el.classList.remove("hud-flag--neutral", "hud-flag--blue", "hud-flag--red");
       if (owner === "blue") {
         el.classList.add("hud-flag--blue");
-        el.setAttribute("aria-label", "You hold the hill");
+        el.setAttribute("aria-label", "You hold the hill — tap for details");
         if (label) label.textContent = "Yours";
       } else if (owner === "red") {
         el.classList.add("hud-flag--red");
-        el.setAttribute("aria-label", "Enemy holds the hill");
+        el.setAttribute("aria-label", "Enemy holds the hill — tap for details");
         if (label) label.textContent = "Enemy";
       } else {
         el.classList.add("hud-flag--neutral");
-        el.setAttribute("aria-label", "Hill unclaimed");
+        el.setAttribute("aria-label", "Hill unclaimed — tap for details");
         if (label) label.textContent = "Hill";
       }
     },
@@ -521,6 +525,7 @@ export function createHud(): HudHandle {
     },
     dispose: () => {
       closeModal();
+      closeHillBriefModal();
       modalHost.remove();
       endHost.remove();
       toastHost.remove();

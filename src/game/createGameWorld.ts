@@ -111,6 +111,13 @@ export interface GameWorld {
   setPaused: (paused: boolean) => void;
   /** Attach baked menu icons (from `bakeThumbnails`). */
   setThumbs: (thumbs: ThumbMap) => void;
+  /**
+   * Idle start: camera on blue pads, platforms pulsing.
+   * Call `confirmIntro` after the tip UI to ease into play.
+   */
+  beginIntro: () => void;
+  /** Smoothly return the camera to match framing and start the match. */
+  confirmIntro: (onComplete?: () => void) => void;
   dispose: () => void;
 }
 
@@ -238,13 +245,23 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   const CAM_ALPHA = Math.PI + Math.PI / 3;
   const CAM_BETA = 0.95;
   const CAM_RADIUS = 42;
+  /** Build-intro framing: closer look at the blue platform row from the flank. */
+  const INTRO_ALPHA = Math.PI + Math.PI / 5.5;
+  const INTRO_BETA = 1.05;
+  const INTRO_RADIUS = 26;
+  const INTRO_TARGET = new Vector3(halfX * 0.22, 0.55, -buildingZ + 0.6);
+  const CAM_TARGET_Y = 0.4;
+  /** Default view: centered on the blue turret line (forefront, not the build pads). */
+  const playerFrontlineZ = -(buildingZ - TURRET_FORWARD_FROM_BASE);
+  const PLAY_TARGET = new Vector3(0, CAM_TARGET_Y, playerFrontlineZ);
+  const INTRO_EASE_SEC = 2.25;
 
   const camera = new ArcRotateCamera(
     "gameCamera",
     CAM_ALPHA,
     CAM_BETA,
     CAM_RADIUS,
-    new Vector3(0, 0.4, 0),
+    PLAY_TARGET.clone(),
     scene,
   );
   camera.lowerAlphaLimit = CAM_ALPHA;
@@ -285,15 +302,14 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
   const CAM_PEEK_FOLLOW_ARM = 0.2;
   /** Backward pan (world −Z) past this disables follow. */
   const CAM_FOLLOW_CANCEL_DELTA = 0.04;
-  const CAM_TARGET_Y = 0.4;
   const CAM_LIM_X = halfX - 2.2;
   const CAM_MIN_Z = -buildingZ - 2.5;
   /** Smoothed +Z pan limit — lags behind raw ally front on retreats. */
-  let smoothedFrontZ = -buildingZ;
+  let smoothedFrontZ = playerFrontlineZ;
   /** Uncapped Z while peeking (null when synced to the displayed target). */
   let camLogicalZ: number | null = null;
   /** Last Z we wrote to the camera — used to measure pan input deltas. */
-  let lastDisplayedZ = 0;
+  let lastDisplayedZ = PLAY_TARGET.z;
   /** After a peek, keep the camera tracking the lead until the player pans back. */
   let camFollow = false;
   let camFollowVel = 0;
@@ -346,6 +362,16 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
 
   let anyBuildingDestroyed = false;
   let gameOver = false;
+  /** Match idle until build intro is confirmed. */
+  let introActive = false;
+  let introEasing: {
+    elapsed: number;
+    fromAlpha: number;
+    fromBeta: number;
+    fromRadius: number;
+    fromTarget: Vector3;
+    onComplete?: () => void;
+  } | null = null;
   let elapsed = 0;
   let aiCooldown = AI_DECISION_INTERVAL_SEC * (0.25 + Math.random() * 0.35);
   const aiBrain = createAiBrain();
@@ -1768,6 +1794,115 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     lastDisplayedZ = z;
   }
 
+  function easeInOutCubic(t: number): number {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+  }
+
+  function easeOutCubic(t: number): number {
+    return 1 - Math.pow(1 - t, 3);
+  }
+
+  function lerpAngle(from: number, to: number, t: number): number {
+    return from + shortestAngleDelta(from, to) * t;
+  }
+
+  function lockCameraTo(
+    alpha: number,
+    beta: number,
+    radius: number,
+    target: Vector3,
+  ): void {
+    camera.alpha = alpha;
+    camera.beta = beta;
+    camera.radius = radius;
+    camera.target.copyFrom(target);
+    camera.lowerAlphaLimit = alpha;
+    camera.upperAlphaLimit = alpha;
+    camera.lowerBetaLimit = beta;
+    camera.upperBetaLimit = beta;
+    camera.lowerRadiusLimit = radius;
+    camera.upperRadiusLimit = radius;
+  }
+
+  function unlockPlayCamera(): void {
+    camera.lowerAlphaLimit = CAM_ALPHA;
+    camera.upperAlphaLimit = CAM_ALPHA;
+    camera.lowerBetaLimit = CAM_BETA;
+    camera.upperBetaLimit = CAM_BETA;
+    camera.lowerRadiusLimit = CAM_RADIUS;
+    camera.upperRadiusLimit = CAM_RADIUS;
+    lastDisplayedZ = camera.target.z;
+    camLogicalZ = null;
+    camFollow = false;
+    camFollowVel = 0;
+    smoothedFrontZ = playerFrontlineZ;
+  }
+
+  function setPlayerPlatformAttention(on: boolean): void {
+    for (const slot of slots) {
+      if (slot.team !== PLAYER_TEAM) continue;
+      slot.platform.setAttention(on);
+    }
+  }
+
+  function beginIntro(): void {
+    introActive = true;
+    introEasing = null;
+    camera.detachControl();
+    lockCameraTo(INTRO_ALPHA, INTRO_BETA, INTRO_RADIUS, INTRO_TARGET);
+    setPlayerPlatformAttention(true);
+  }
+
+  function confirmIntro(onComplete?: () => void): void {
+    if (!introActive && !introEasing) {
+      onComplete?.();
+      return;
+    }
+    setPlayerPlatformAttention(false);
+    introActive = false;
+    introEasing = {
+      elapsed: 0,
+      fromAlpha: camera.alpha,
+      fromBeta: camera.beta,
+      fromRadius: camera.radius,
+      fromTarget: camera.target.clone(),
+      onComplete,
+    };
+  }
+
+  function updateIntroCamera(dt: number): void {
+    if (!introEasing) return;
+    introEasing.elapsed += dt;
+    const u = Math.min(1, introEasing.elapsed / INTRO_EASE_SEC);
+    const tPos = easeInOutCubic(u);
+    const tZoom = easeOutCubic(u);
+
+    camera.alpha = lerpAngle(introEasing.fromAlpha, CAM_ALPHA, tPos);
+    camera.beta = introEasing.fromBeta + (CAM_BETA - introEasing.fromBeta) * tPos;
+    camera.radius =
+      introEasing.fromRadius + (CAM_RADIUS - introEasing.fromRadius) * tZoom;
+    camera.target.copyFrom(
+      Vector3.Lerp(introEasing.fromTarget, PLAY_TARGET, tPos),
+    );
+
+    // Keep limits tracking the live values so Babylon doesn't snap
+    camera.lowerAlphaLimit = camera.alpha;
+    camera.upperAlphaLimit = camera.alpha;
+    camera.lowerBetaLimit = camera.beta;
+    camera.upperBetaLimit = camera.beta;
+    camera.lowerRadiusLimit = camera.radius;
+    camera.upperRadiusLimit = camera.radius;
+
+    if (u >= 1) {
+      const done = introEasing.onComplete;
+      introEasing = null;
+      unlockPlayCamera();
+      camera.attachControl(true, false, 0);
+      camera.inputs.removeByType("ArcRotateCameraMouseWheelInput");
+      done?.();
+    }
+  }
+
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0) return;
     pointerDown = { x: e.clientX, y: e.clientY };
@@ -1795,6 +1930,7 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
       return;
     }
     if (gameOver) return;
+    if (introActive || introEasing) return;
 
     const pick = scene.pick(scene.pointerX, scene.pointerY, (mesh) =>
       pickToSlot.has(mesh.uniqueId),
@@ -1870,6 +2006,16 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     elapsed += dt;
     terrain.update(dt, elapsed);
     hud.update(dt);
+
+    if (introActive || introEasing) {
+      updateIntroCamera(dt);
+      captureFlag.update(dt, elapsed);
+      for (const slot of slots) {
+        slot.platform.update(dt, elapsed);
+      }
+      return;
+    }
+
     updateCameraBounds(dt);
 
     if (!gameOver) {
@@ -2065,6 +2211,8 @@ export function createGameWorld(engine: Engine, canvas: HTMLCanvasElement): Game
     setThumbs: (thumbs) => {
       hud.setThumbs(thumbs);
     },
+    beginIntro,
+    confirmIntro,
     dispose: () => {
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);

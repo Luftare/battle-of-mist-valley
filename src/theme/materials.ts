@@ -37,6 +37,11 @@ export function purgeMaterialCache(prefix: string): void {
   }
 }
 
+/** Clear all cached materials (e.g. after disposing a temporary scene). */
+export function clearMaterialCache(): void {
+  materialCache.clear();
+}
+
 export function box(
   scene: Scene,
   name: string,

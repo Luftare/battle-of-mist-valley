@@ -1,4 +1,4 @@
-import { Scene, TransformNode, Vector3, type Mesh } from "@babylonjs/core";
+import { Color3, Scene, TransformNode, Vector3, type Mesh } from "@babylonjs/core";
 import { TEAM_COLORS, WORLD_COLORS, type Team } from "../theme/colors";
 import { box, colorMat } from "../theme/materials";
 
@@ -15,6 +15,8 @@ export interface PlatformHandle {
   setHighlight: (on: boolean) => void;
   /** Show/hide the dirt pad + stakes (hidden while a building occupies the slot). */
   setSiteVisible: (visible: boolean) => void;
+  /** Soft pad glow to draw the eye (build intro). */
+  setAttention: (on: boolean) => void;
   update: (dt: number, time: number) => void;
   dispose: () => void;
 }
@@ -32,6 +34,8 @@ export function createPlatform(
   const palette = TEAM_COLORS[team];
   const root = new TransformNode(`${name}_root`, scene);
   const phase = Math.random() * Math.PI * 2;
+  const accentHex = palette.secondary;
+  const accentColor = Color3.FromHexString(accentHex);
 
   // Floor / rim never scaled — only stakes spin for team facing
   const base = new TransformNode(`${name}_base`, scene);
@@ -47,11 +51,13 @@ export function createPlatform(
   const edgeMat = colorMat(scene, "platform_edge", "#5a4a38");
   const stakeMat = colorMat(scene, "platform_stake", WORLD_COLORS.bark);
   const flagMat = colorMat(scene, `${name}_flag`, palette.primary);
-  const accentMat = colorMat(scene, `${name}_accent`, palette.secondary);
-  const highlightMat = colorMat(scene, `${name}_hi`, palette.secondary, {
+  const accentMat = colorMat(scene, `${name}_accent`, accentHex);
+  const highlightMat = colorMat(scene, `${name}_hi`, accentHex, {
     specular: 0,
     emissive: 0.35,
   });
+  highlightMat.transparencyMode = 2; // ALPHA_BLEND
+  highlightMat.alpha = 0.72;
 
   const floor = box(
     scene,
@@ -170,18 +176,40 @@ export function createPlatform(
   hi.isPickable = false;
   hi.setEnabled(false);
 
+  let attention = false;
+  let highlightForced = false;
+
+  function applyHighlightVisibility(): void {
+    hi.setEnabled(highlightForced || attention);
+    if (!attention) {
+      highlightMat.emissiveColor = accentColor.scale(0.35);
+      highlightMat.alpha = 0.72;
+      hi.visibility = 1;
+    }
+  }
+
   return {
     root,
     pickMesh,
     team,
     slotIndex,
     setHighlight: (on) => {
-      hi.setEnabled(on);
+      highlightForced = on;
+      applyHighlightVisibility();
     },
     setSiteVisible: (visible) => {
       base.setEnabled(visible);
       facing.setEnabled(visible);
-      if (!visible) hi.setEnabled(false);
+      if (!visible) {
+        attention = false;
+        hi.setEnabled(false);
+      } else {
+        applyHighlightVisibility();
+      }
+    },
+    setAttention: (on) => {
+      attention = on;
+      applyHighlightVisibility();
     },
     update: (_dt, time) => {
       if (!facing.isEnabled()) return;
@@ -189,6 +217,13 @@ export function createPlatform(
       for (let i = 0; i < ribbons.length; i++) {
         ribbons[i].rotation.y = Math.sin(t * 2.2 + i * 0.8) * 0.35;
         ribbons[i].rotation.z = Math.sin(t * 1.6 + i) * 0.12;
+      }
+      if (attention) {
+        // Slow tactical pulse — designate pads without bouncing geometry
+        const pulse = 0.5 + 0.5 * Math.sin(t * 1.55 + slotIndex * 0.35);
+        highlightMat.emissiveColor = accentColor.scale(0.22 + pulse * 0.42);
+        highlightMat.alpha = 0.45 + pulse * 0.4;
+        hi.visibility = 0.75 + pulse * 0.25;
       }
     },
     dispose: () => {
