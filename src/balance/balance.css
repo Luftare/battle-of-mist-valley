@@ -1,0 +1,225 @@
+.balance-page {
+  background: #1a2a1c;
+}
+
+.lab-panel {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: min(22.5rem, 100%);
+  z-index: 12;
+  overflow: auto;
+  padding: max(0.85rem, env(safe-area-inset-top)) 1rem
+    max(1rem, env(safe-area-inset-bottom));
+  background: linear-gradient(
+    180deg,
+    rgba(10, 18, 12, 0.92),
+    rgba(12, 22, 14, 0.78)
+  );
+  border-right: 1px solid rgba(180, 200, 160, 0.22);
+  color: #e8f0e4;
+  pointer-events: auto;
+  touch-action: pan-y;
+  user-select: none;
+  font-size: 0.86rem;
+  line-height: 1.4;
+}
+
+.lab-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.55rem;
+}
+
+.lab-kicker {
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(200, 220, 170, 0.7);
+  margin-bottom: 0.1rem;
+}
+
+.lab-head h1 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.lab-back {
+  color: #c5e0f5;
+  text-decoration: none;
+  font-size: 0.78rem;
+  font-weight: 650;
+  padding: 0.28rem 0.5rem;
+  border: 1px solid rgba(106, 168, 216, 0.4);
+  border-radius: 0.3rem;
+  background: rgba(30, 58, 85, 0.45);
+}
+
+.lab-lead {
+  color: rgba(232, 240, 228, 0.78);
+  margin-bottom: 0.85rem;
+  font-size: 0.8rem;
+}
+
+.lab-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28rem;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(200, 220, 170, 0.75);
+  margin-bottom: 0.75rem;
+}
+
+.lab-field select,
+.lab-controls button,
+.lab-speed button {
+  font: inherit;
+  color: #e8f0e4;
+  background: rgba(18, 30, 20, 0.9);
+  border: 1px solid rgba(180, 200, 160, 0.32);
+  border-radius: 0.32rem;
+  padding: 0.4rem 0.5rem;
+  cursor: pointer;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+  font-size: 0.84rem;
+}
+
+.lab-field select {
+  width: 100%;
+}
+
+.lab-compose {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.55rem;
+  margin-bottom: 0.75rem;
+}
+
+.lab-compose fieldset {
+  border: 1px solid rgba(180, 200, 160, 0.22);
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.5rem 0.5rem;
+}
+
+.lab-compose legend {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 0 0.2rem;
+}
+
+.lab-compose fieldset:first-child legend {
+  color: #6aa8d8;
+}
+
+.lab-compose fieldset:last-child legend {
+  color: #d86a6a;
+}
+
+.lab-compose label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.22rem;
+  font-weight: 600;
+}
+
+.lab-plan {
+  font-weight: 700;
+  font-size: 0.92rem;
+  margin-bottom: 0.25rem;
+}
+
+.lab-plan .blue {
+  color: #6aa8d8;
+}
+
+.lab-plan .red {
+  color: #d86a6a;
+}
+
+.lab-weights {
+  font-variant-numeric: tabular-nums;
+  color: rgba(232, 240, 228, 0.72);
+  font-size: 0.78rem;
+  margin-bottom: 0.7rem;
+}
+
+.lab-check {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+  font-weight: 600;
+}
+
+.lab-check:last-of-type {
+  margin-bottom: 0.75rem;
+}
+
+.lab-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.7rem;
+}
+
+.lab-speed {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.lab-speed button.is-on,
+.lab-controls button:active {
+  border-color: rgba(212, 168, 75, 0.7);
+  background: rgba(80, 60, 20, 0.55);
+}
+
+.lab-status {
+  min-height: 1.4rem;
+  font-weight: 700;
+  margin-bottom: 0.65rem;
+}
+
+.lab-status.is-blue {
+  color: #6aa8d8;
+}
+
+.lab-status.is-red {
+  color: #d86a6a;
+}
+
+.lab-econ {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.15rem 0.7rem;
+  font-size: 0.75rem;
+  color: rgba(232, 240, 228, 0.68);
+  font-variant-numeric: tabular-nums;
+}
+
+.lab-econ dt {
+  font-weight: 700;
+  color: rgba(232, 240, 228, 0.88);
+}
+
+@media (max-width: 720px) {
+  .lab-panel {
+    top: auto;
+    right: 0;
+    width: 100%;
+    max-height: 46%;
+    border-right: none;
+    border-top: 1px solid rgba(180, 200, 160, 0.22);
+  }
+}

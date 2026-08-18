@@ -32,8 +32,8 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
     hpBarHeight: 1.35,
   },
   helicopter: {
-    maxHp: 45,
-    damage: 55,
+    maxHp: 70,
+    damage: 120,
     shootRange: 11,
     moveSpeed: 1.35,
     fireRateHz: 0.2,
@@ -53,14 +53,14 @@ export const UNIT_STATS: Record<UnitKind, UnitStats> = {
 };
 
 /** Chin-gun damage / rate when heli engages soft targets. */
-export const HELI_GUN_DAMAGE = 11;
-export const HELI_GUN_FIRE_HZ = 5.5;
+export const HELI_GUN_DAMAGE = 15;
+export const HELI_GUN_FIRE_HZ = 3;
 /** Chin-gun reach: 80% of rifleman range, then +25%. */
 export const HELI_GUN_RANGE = UNIT_STATS.rifleman.shootRange * 0.8 * 1.25;
 
 /** Splash radii for areal weapons (tank shell / heli missile). */
 export const TANK_SPLASH_RADIUS = 2.2;
-export const MISSILE_SPLASH_RADIUS = 2.8;
+export const MISSILE_SPLASH_RADIUS = 1.5;
 
 /**
  * Hitscan / shell hit chance vs range.
@@ -181,6 +181,29 @@ export const UNIT_KINDS: UnitKind[] = [
   "helicopter",
   "supplyTruck",
 ];
+
+/** Combat units used in balance encounters (supply trucks do not fight). */
+export type CombatUnitKind = "rifleman" | "tank" | "helicopter";
+
+export const COMBAT_UNIT_KINDS: CombatUnitKind[] = [
+  "rifleman",
+  "tank",
+  "helicopter",
+];
+
+/**
+ * Seconds between spawns from a producer, ignoring research bonuses.
+ * Research Lab never spawns.
+ */
+export function spawnIntervalForBuilding(kind: BuildingKind): number {
+  if (kind === "researchLab") return Infinity;
+  if (kind === "factory") return FACTORY_SPAWN_INTERVAL_SEC;
+  return SPAWN_INTERVAL_SEC;
+}
+
+export function spawnIntervalForUnit(kind: UnitKind): number {
+  return spawnIntervalForBuilding(UNIT_TO_BUILDING[kind]);
+}
 
 export const BUILDING_KINDS: BuildingKind[] = [
   "barracks",

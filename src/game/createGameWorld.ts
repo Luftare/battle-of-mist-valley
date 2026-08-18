@@ -37,8 +37,7 @@ import {
   FLAG_CAPTURE_RADIUS,
   FLAG_COINS_PER_SEC,
   SLOT_COUNT,
-  SPAWN_INTERVAL_SEC,
-  FACTORY_SPAWN_INTERVAL_SEC,
+  spawnIntervalForBuilding,
   HELI_GUN_DAMAGE,
   HELI_GUN_FIRE_HZ,
   HELI_GUN_RANGE,
@@ -217,12 +216,9 @@ function scatterAim(from: Vector3, aim: Vector3, radius = MISS_SCATTER_RADIUS): 
 }
 
 function spawnIntervalFor(kind: BuildingKind, infantryProdLevel = 0): number {
-  if (kind === "researchLab") return Infinity;
-  if (kind === "barracks") {
-    return SPAWN_INTERVAL_SEC / infantryProdMul(infantryProdLevel);
-  }
-  if (kind === "factory") return FACTORY_SPAWN_INTERVAL_SEC;
-  return SPAWN_INTERVAL_SEC;
+  const base = spawnIntervalForBuilding(kind);
+  if (kind === "barracks") return base / infantryProdMul(infantryProdLevel);
+  return base;
 }
 
 /**

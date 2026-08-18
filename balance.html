@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>Balance Lab — Mist Valley</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/balance/balance.css" />
+  </head>
+  <body class="balance-page">
+    <canvas id="renderCanvas" touch-action="none"></canvas>
+    <aside id="lab-panel" class="lab-panel">
+      <header class="lab-head">
+        <div>
+          <p class="lab-kicker">Sandbox</p>
+          <h1>Balance Lab</h1>
+        </div>
+        <a class="lab-back" href="/">Game</a>
+      </header>
+
+      <p class="lab-lead">
+        Armies are sized from building cost × spawn interval so both sides spend
+        similar resources. Smallest integer counts that reach
+        <strong>0.9</strong> balance (no half units).
+      </p>
+
+      <label class="lab-field">
+        Encounter
+        <select id="encounter"></select>
+      </label>
+
+      <div class="lab-compose">
+        <fieldset>
+          <legend>Blue</legend>
+          <label><input type="checkbox" data-team="blue" value="rifleman" /> Rifle</label>
+          <label><input type="checkbox" data-team="blue" value="tank" /> Tank</label>
+          <label><input type="checkbox" data-team="blue" value="helicopter" /> Heli</label>
+        </fieldset>
+        <fieldset>
+          <legend>Red</legend>
+          <label><input type="checkbox" data-team="red" value="rifleman" /> Rifle</label>
+          <label><input type="checkbox" data-team="red" value="tank" /> Tank</label>
+          <label><input type="checkbox" data-team="red" value="helicopter" /> Heli</label>
+        </fieldset>
+      </div>
+
+      <div id="plan" class="lab-plan"></div>
+      <p id="weights" class="lab-weights"></p>
+
+      <label class="lab-check">
+        <input type="checkbox" id="singles" />
+        One per type (no weighting)
+      </label>
+      <label class="lab-check">
+        <input type="checkbox" id="missiles" />
+        Hellfire missiles (heli vs vehicles)
+      </label>
+
+      <div class="lab-controls">
+        <button type="button" id="restart">Fight again</button>
+        <button type="button" id="pause">Pause</button>
+        <div class="lab-speed" role="group" aria-label="Speed">
+          <button type="button" data-speed="1" class="is-on">1×</button>
+          <button type="button" data-speed="2">2×</button>
+          <button type="button" data-speed="4">4×</button>
+        </div>
+      </div>
+
+      <div id="status" class="lab-status">Ready</div>
+      <dl id="economy" class="lab-econ"></dl>
+    </aside>
+    <script type="module" src="/src/balance/page.ts"></script>
+  </body>
+</html>
