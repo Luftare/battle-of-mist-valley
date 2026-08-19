@@ -8,7 +8,7 @@
     "build": "tsc && vite build",
     "heroku-postbuild": "npm run build",
     "preview": "vite preview",
-    "start": "tsx server/index.ts",
+    "start": "node --import tsx server/index.ts",
     "bake-thumbs": "node scripts/bake-thumbs.mjs"
   },
   "dependencies": {
