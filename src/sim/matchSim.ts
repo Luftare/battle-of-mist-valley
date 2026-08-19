@@ -40,6 +40,7 @@ import {
 } from "../game/stats";
 import {
   createTeamTechLevels,
+  heliRangeMul,
   heliGunFireRateMul,
   INFANTRY_ACCURACY_MUL,
   infantryProdMul,
@@ -328,6 +329,10 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
     return HELI_GUN_FIRE_HZ * heliGunFireRateMul(techLevels[team].heliGunFireRate);
   }
 
+  function heliWeaponRange(team: Team, baseRange: number): number {
+    return baseRange * heliRangeMul(techLevels[team].heliRange);
+  }
+
   function placeBuilding(slot: SimSlot, kind: BuildingKind): boolean {
     if (slot.building && !slot.building.destroyed) return false;
     if (slot.building?.destroyed) return false;
@@ -528,7 +533,9 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
           const u = units.find((n) => n.id === target.id);
           return u?.kind === "tank" || u?.kind === "supplyTruck";
         })();
-      return useMissile ? attacker.shootRange : HELI_GUN_RANGE;
+      return useMissile
+        ? heliWeaponRange(attacker.team, attacker.shootRange)
+        : heliWeaponRange(attacker.team, HELI_GUN_RANGE);
     }
     return attacker.shootRange;
   }

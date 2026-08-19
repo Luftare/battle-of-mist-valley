@@ -12,6 +12,7 @@ export type UpgradeId =
   | "infantryAccuracy"
   | "tankHp"
   | "heliMissiles"
+  | "heliRange"
   | "heliGunFireRate"
   | "infantryProd"
   | "tankSplash"
@@ -25,6 +26,7 @@ export const UPGRADE_SUBJECT: Record<UpgradeId, ThumbId> = {
   infantryAccuracy: "rifleman",
   tankHp: "tank",
   heliMissiles: "helicopter",
+  heliRange: "helicopter",
   heliGunFireRate: "helicopter",
   infantryProd: "rifleman",
   tankSplash: "tank",
@@ -69,6 +71,8 @@ export const TURRET_RANGE_MUL = 1.5;
  * Level 5 → 1.75× original gun cadence.
  */
 export const HELI_GUN_FIRE_RATE_BONUS_PER_LEVEL = 0.15;
+/** Sky Radar: +10% heli weapon range per level (stacks additively). */
+export const HELI_RANGE_BONUS_PER_LEVEL = 0.1;
 
 /** Barracks spawn-rate multiplier from Rapid Deployment stacks (1 at level 0). */
 export function infantryProdMul(level: number): number {
@@ -80,6 +84,12 @@ export function infantryProdMul(level: number): number {
 export function heliGunFireRateMul(level: number): number {
   if (level <= 0) return 1;
   return 1 + HELI_GUN_FIRE_RATE_BONUS_PER_LEVEL * level;
+}
+
+/** Heli weapon-range multiplier from Sky Radar stacks (1 at level 0). */
+export function heliRangeMul(level: number): number {
+  if (level <= 0) return 1;
+  return 1 + HELI_RANGE_BONUS_PER_LEVEL * level;
 }
 
 export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
@@ -115,6 +125,15 @@ export const UPGRADE_DEFS: Record<UpgradeId, UpgradeDef> = {
     cost: 200,
     durationSec: 30,
     maxLevel: 1,
+  },
+  heliRange: {
+    id: "heliRange",
+    label: "Sky Radar",
+    blurb: "+10% heli weapon range.",
+    cost: 250,
+    durationSec: 20,
+    maxLevel: 5,
+    costPerLevel: 80,
   },
   heliGunFireRate: {
     id: "heliGunFireRate",
@@ -181,6 +200,7 @@ export const UPGRADE_IDS: UpgradeId[] = [
   "tankFireRate",
   // Helicopter
   "heliMissiles",
+  "heliRange",
   "heliGunFireRate",
   // Turret
   "turretRange",
@@ -202,6 +222,7 @@ export function createTeamTechLevels(): Record<UpgradeId, number> {
     infantryAccuracy: 0,
     tankHp: 0,
     heliMissiles: 0,
+    heliRange: 0,
     heliGunFireRate: 0,
     infantryProd: 0,
     tankSplash: 0,
