@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "heroku-postbuild": "npm run build",
     "preview": "vite preview",
     "start": "tsx server/index.ts",
     "bake-thumbs": "node scripts/bake-thumbs.mjs"
@@ -13,12 +14,12 @@
   "dependencies": {
     "@babylonjs/core": "^8.0.0",
     "@babylonjs/materials": "^8.0.0",
+    "tsx": "^4.19.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
     "@types/node": "^22.15.0",
     "@types/ws": "^8.18.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "vite": "^6.3.0"
   }
