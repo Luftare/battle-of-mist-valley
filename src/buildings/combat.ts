@@ -1,4 +1,4 @@
-import { TransformNode, Vector3 } from "@babylonjs/core";
+import { Material, Mesh, TransformNode, Vector3 } from "@babylonjs/core";
 import { spawnExplosion } from "../fx/explosion";
 import { createWreckSmoke, type WreckSmokeHandle } from "../fx/wreckSmoke";
 import {
@@ -89,6 +89,30 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
     return pieces;
   }
 
+  /**
+   * Wreck chunks can outlive the original building handle; clone materials so
+   * team colors survive even if the original material graph is disposed later.
+   */
+  function preservePieceMaterials(pieces: TransformNode[]): void {
+    const clonedBySource = new Map<number, Material>();
+    for (const piece of pieces) {
+      const meshes = piece.getChildMeshes(false);
+      if (piece instanceof Mesh) meshes.push(piece);
+      for (const mesh of meshes) {
+        const source = mesh.material;
+        if (!source) continue;
+        let cloned = clonedBySource.get(source.uniqueId);
+        if (!cloned) {
+          const next = source.clone(`${source.name}_${opts.root.name}_wreck`);
+          if (!next) continue;
+          clonedBySource.set(source.uniqueId, next);
+          cloned = next;
+        }
+        mesh.material = cloned;
+      }
+    }
+  }
+
   /** Soft pop: pieces nudge apart, land nearby, then bury — tiny flash only. */
   function explode(): void {
     const scene = opts.root.getScene();
@@ -98,6 +122,7 @@ export function withBuildingCombat(opts: BuildingCombatOpts): BuildingHandle {
     origin.y = groundY + 0.55;
 
     const pieces = collectBlastPieces();
+    preservePieceMaterials(pieces);
     for (let i = 0; i < pieces.length; i++) {
       const piece = pieces[i];
       // Mostly sideways scatter; barely any loft so chunks land quickly

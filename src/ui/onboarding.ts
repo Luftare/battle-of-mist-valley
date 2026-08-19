@@ -77,11 +77,11 @@ export function showOnboarding(opts: { onDismiss: () => void }): void {
       i += 1;
       const ch = fullBrief[i - 1];
       const delay =
-        ch === ":" ? 220 : ch === "." ? 200 : ch === " " ? 36 : 28;
+        ch === ":" ? 74 : ch === "." ? 67 : ch === " " ? 12 : 9;
       window.setTimeout(typeNext, delay);
     };
 
-    window.setTimeout(typeNext, 480);
+    window.setTimeout(typeNext, 160);
 
     go?.addEventListener(
       "click",

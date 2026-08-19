@@ -234,6 +234,14 @@ export function createMatchView(opts: {
     return vis.handle;
   }
 
+  function disposeBuildingVisual(id: number): void {
+    const vis = buildings.get(id);
+    if (!vis) return;
+    vis.hpBar.dispose();
+    vis.handle.dispose();
+    buildings.delete(id);
+  }
+
   function spawnVisualUnit(ev: Extract<MatchEvent, { type: "UnitSpawned" }>): void {
     if (units.has(ev.unitId)) return;
     const unit = createUnitOfKind(
@@ -431,7 +439,18 @@ export function createMatchView(opts: {
     hud.setFlagOwner(snap.flagOwner);
     captureFlag.setOwner(snap.flagOwner);
 
+    const presentBuildingIds = new Set<number>();
     for (const s of snap.slots) {
+      if (s.kind && s.buildingId !== null) presentBuildingIds.add(s.buildingId);
+    }
+    for (const [id, vis] of buildings) {
+      if (presentBuildingIds.has(id)) continue;
+      disposeBuildingVisual(id);
+      slotOf(vis.team, vis.slotIndex)?.platform.setSiteVisible(true);
+    }
+
+    for (const s of snap.slots) {
+      slotOf(s.team, s.index)?.platform.setSiteVisible(s.kind === null);
       if (s.kind && s.buildingId !== null && !buildings.has(s.buildingId)) {
         const slot = slotOf(s.team, s.index);
         if (slot) placeVisualBuilding(slot, s.kind, s.buildingId);
