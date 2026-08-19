@@ -182,6 +182,7 @@ export function createHelicopter(
   let moving = false;
   let missilesEnabled = false;
   let fireCooldown = 0;
+  let autoFire = true;
   /** Chin-gun cadence; missiles always use HELI_MISSILE_HZ. */
   let fireRateHz = HELI_GUN_FIRE_HZ;
   let nextPod = 0;
@@ -330,6 +331,20 @@ export function createHelicopter(
     setOnFire: (cb) => {
       combatState.onFire = cb;
     },
+    setAutoFire: (enabled) => {
+      autoFire = enabled;
+    },
+    playFireFx: (kind = "gun") => {
+      if (kind === "missile") {
+        flashTimer = 0.14;
+        launchKick = 1;
+        flashSide = nextPod as 0 | 1;
+        nextPod = 1 - nextPod;
+        return;
+      }
+      gunFlashTimer = 0.05;
+      gunRecoil = 1;
+    },
     setOnMissileHit: (cb) => {
       combatState.onMissileHit = cb;
     },
@@ -465,7 +480,7 @@ export function createHelicopter(
       mainRotor.rotation.y = mainSpin;
       tailRotor.rotation.x = tailSpin;
 
-      if (combat && aimTarget && !aimTarget.destroyed) {
+      if (autoFire && combat && aimTarget && !aimTarget.destroyed) {
         const useMissile = missilesEnabled && isVehicleTarget(aimTarget);
         fireCooldown -= dt;
         if (fireCooldown <= 0) {

@@ -234,6 +234,12 @@ export function createSupplyTruck(
     setOnFire: () => {
       /* unarmed */
     },
+    setAutoFire: () => {
+      /* unarmed */
+    },
+    playFireFx: () => {
+      /* unarmed */
+    },
     setOnMissileHit: () => {
       /* unarmed */
     },

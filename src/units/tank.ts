@@ -162,6 +162,7 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
   let fireCooldown = 0;
   let recoil = 0;
   let flashTimer = 0;
+  let autoFire = true;
   let fireRateHz = TANK_FIRE_HZ;
   let moveBob = 0;
   let aimTarget: CombatEntity | null = null;
@@ -278,6 +279,14 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
     setOnFire: (cb) => {
       combatState.onFire = cb;
     },
+    setAutoFire: (enabled) => {
+      autoFire = enabled;
+    },
+    playFireFx: () => {
+      recoil = 1;
+      flashTimer = 0.12;
+      combatState.onFire?.();
+    },
     setOnMissileHit: () => {},
     setMoving: (active) => {
       if (combatState.destroyed) return;
@@ -362,13 +371,11 @@ export function createTank(scene: Scene, name: string, team: Team): UnitHandle {
           aimed = false;
         }
 
-        if (aimed && aimTarget && !aimTarget.destroyed) {
+        if (aimed && autoFire && aimTarget && !aimTarget.destroyed) {
           fireCooldown -= dt;
           if (fireCooldown <= 0) {
             fireCooldown = 1 / fireRateHz;
-            recoil = 1;
-            flashTimer = 0.12;
-            combatState.onFire?.();
+            handle.playFireFx();
           }
         }
       } else {

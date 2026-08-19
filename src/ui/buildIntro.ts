@@ -29,3 +29,21 @@ export function showBuildIntro(opts: { onConfirm: () => void }): void {
     { once: true },
   );
 }
+
+/** Shown after you confirm the build intro while the other player has not. */
+export function showWaitingForPeer(): { dispose: () => void } {
+  const existing = document.getElementById("mpPeerWaitHost");
+  existing?.remove();
+  const host = document.createElement("div");
+  host.id = "mpPeerWaitHost";
+  host.className = "build-intro-host build-intro-host--wait";
+  host.innerHTML = `
+    <div class="build-intro-panel" role="status">
+      <p class="build-intro-tip">Waiting for the other player to start…</p>
+    </div>
+  `;
+  document.body.appendChild(host);
+  return {
+    dispose: () => host.remove(),
+  };
+}

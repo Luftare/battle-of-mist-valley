@@ -1,4 +1,8 @@
-import type { Obstacle } from "../terrain/createTerrain";
+export interface Obstacle {
+  x: number;
+  z: number;
+  radius: number;
+}
 
 export interface Vec2 {
   x: number;

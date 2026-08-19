@@ -128,6 +128,7 @@ export function createRifleman(
   let fireCooldown = 0;
   let recoil = 0;
   let flashTimer = 0;
+  let autoFire = true;
   let fireRateHz = 2;
   let walkPhase = phase;
   let deathSettled = false;
@@ -227,6 +228,14 @@ export function createRifleman(
     },
     setOnFire: (cb) => {
       combatState.onFire = cb;
+    },
+    setAutoFire: (enabled) => {
+      autoFire = enabled;
+    },
+    playFireFx: () => {
+      recoil = 1;
+      flashTimer = 0.06;
+      combatState.onFire?.();
     },
     setOnMissileHit: () => {},
     setMoving: (active) => {
@@ -394,13 +403,11 @@ export function createRifleman(
       rightLeg.rotation.y = -pose * 0.08 * (1 - moveBlend);
       rightLeg.rotation.z = -pose * 0.05 * (1 - moveBlend);
 
-      if (combat && pose > 0.9 && aimTarget && !aimTarget.destroyed) {
+      if (autoFire && combat && pose > 0.9 && aimTarget && !aimTarget.destroyed) {
         fireCooldown -= dt;
         if (fireCooldown <= 0) {
           fireCooldown = 1 / fireRateHz;
-          recoil = 1;
-          flashTimer = 0.06;
-          combatState.onFire?.();
+          handle.playFireFx();
         }
       }
 

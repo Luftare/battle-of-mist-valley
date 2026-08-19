@@ -931,6 +931,10 @@ body {
   pointer-events: none;
 }
 
+.build-intro-host--wait {
+  pointer-events: none;
+}
+
 .build-intro-panel {
   width: min(100%, 22rem);
   text-align: center;
@@ -1022,6 +1026,66 @@ body {
 
 .end-panel--defeat h2 {
   color: #e09080;
+}
+
+.mp-lobby-host {
+  position: fixed;
+  inset: 0;
+  z-index: 58;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 1.25rem;
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  background: linear-gradient(
+    to top,
+    rgba(6, 12, 8, 0.82) 0%,
+    rgba(6, 12, 8, 0.35) 28%,
+    transparent 52%
+  );
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+
+.mp-lobby-panel {
+  width: min(100%, 22rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  text-align: center;
+  color: #e8f0e4;
+}
+
+.mp-lobby-title {
+  font-size: 1.35rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+}
+
+.mp-lobby-tip {
+  font-size: 0.88rem;
+  line-height: 1.4;
+  color: rgba(220, 230, 215, 0.88);
+  text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+}
+
+.mp-lobby-btn {
+  width: 100%;
+  pointer-events: auto;
+}
+
+.mp-lobby-code-display {
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: #f0d078;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.55);
+}
+
+.mp-lobby-error {
+  color: #e09080;
+  font-size: 0.82rem;
 }
 
 @media (min-width: 720px) {

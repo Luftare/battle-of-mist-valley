@@ -19,12 +19,9 @@ import { WORLD_COLORS } from "../theme/colors";
 import { box, colorMat, cylinder } from "../theme/materials";
 import { isMobileDevice } from "../platform/mobile";
 import { createBlobShadow, type BlobShadowHandle } from "../units/shadow";
+import type { Obstacle } from "../game/pathfinding";
 
-export interface Obstacle {
-  x: number;
-  z: number;
-  radius: number;
-}
+export type { Obstacle };
 
 export interface TerrainTree {
   x: number;

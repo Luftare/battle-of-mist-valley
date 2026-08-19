@@ -25,6 +25,8 @@ export interface TurretHandle extends CombatEntity {
   lastAttackerTeam: Team | null;
   setAimTarget: (target: CombatEntity | null) => void;
   setOnFire: (cb: (() => void) | null) => void;
+  setAutoFire: (enabled: boolean) => void;
+  playFireFx: () => void;
   /** Restore HP without exceeding max (research regen). */
   heal: (amount: number) => void;
   /** World-space muzzle for the next barrel in the alternating pair. */
@@ -208,6 +210,7 @@ export function createTurret(
   let shake = 0;
   let aimTarget: CombatEntity | null = null;
   let fireCooldown = 0.3 + Math.random() * 0.4;
+  let autoFire = true;
   let nextBarrel: 0 | 1 = 0;
   let flashTimer = 0;
   let flashSide: 0 | 1 = 0;
@@ -293,6 +296,17 @@ export function createTurret(
     },
     setOnFire: (cb) => {
       onFire = cb;
+    },
+    setAutoFire: (enabled) => {
+      autoFire = enabled;
+    },
+    playFireFx: () => {
+      flashSide = nextBarrel;
+      flashTimer = 0.07;
+      const b = nextBarrel === 0 ? barrelL : barrelR;
+      b.position.z = 0.28;
+      nextBarrel = (1 - nextBarrel) as 0 | 1;
+      onFire?.();
     },
     getMuzzlePoint: () => {
       // Point just ahead of the barrel that is about to fire
@@ -383,17 +397,11 @@ export function createTurret(
         flashR.visibility = 0;
       }
 
-      if (aimTarget && !aimTarget.destroyed && aligned) {
+      if (autoFire && aimTarget && !aimTarget.destroyed && aligned) {
         fireCooldown -= dt;
         if (fireCooldown <= 0) {
           fireCooldown = 1 / TURRET_FIRE_HZ;
-          flashSide = nextBarrel;
-          flashTimer = 0.07;
-          // Recoil the firing barrel
-          const b = nextBarrel === 0 ? barrelL : barrelR;
-          b.position.z = 0.28;
-          nextBarrel = (1 - nextBarrel) as 0 | 1;
-          onFire?.();
+          handle.playFireFx();
         }
       }
 

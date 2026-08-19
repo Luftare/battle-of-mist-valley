@@ -32,6 +32,13 @@ export interface UnitHandle extends CombatEntity {
   /** Called whenever this unit fires a hitscan shot (rifleman / tank / heli gun). */
   setOnFire: (cb: (() => void) | null) => void;
   /**
+   * When false, this unit does not tick its own fire cadence (MatchSim owns shots).
+   * Default true so the balance lab keeps working.
+   */
+  setAutoFire: (enabled: boolean) => void;
+  /** Play muzzle / launch FX without applying damage. */
+  playFireFx: (kind?: "gun" | "missile") => void;
+  /**
    * Helicopter missiles: called when a missile reaches its aim target.
    * Receives the launch-time target (so wrecked helis still deal damage) and hit position.
    * Hitscan units ignore this.
