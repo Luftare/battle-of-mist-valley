@@ -1097,9 +1097,12 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
   function enterCombat(unit: SimUnit): void {
     if (!unit.combat) {
       unit.combat = true;
-      if (unit.kind === "rifleman") unit.fireCooldown = rng.range(0.15, 0.35);
-      else if (unit.kind === "tank") unit.fireCooldown = 0.35;
-      else if (unit.kind === "helicopter") unit.fireCooldown = rng.range(0.25, 0.45);
+      let windup = 0;
+      if (unit.kind === "rifleman") windup = rng.range(0.15, 0.35);
+      else if (unit.kind === "tank") windup = 0.35;
+      else if (unit.kind === "helicopter") windup = rng.range(0.25, 0.45);
+      // Never shorten an active reload — knockback range flaps must not boost fire rate.
+      unit.fireCooldown = Math.max(unit.fireCooldown, windup);
     }
   }
 
@@ -1187,10 +1190,9 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
     );
   }
 
-  function updateUnitCombatFire(unit: SimUnit, dt: number): void {
+  function updateUnitCombatFire(unit: SimUnit, _dt: number): void {
     if (!unit.combat || !unit.focus) return;
     if (entityDestroyed(unit.focus)) return;
-    unit.fireCooldown -= dt;
     if (unit.fireCooldown > 0) return;
     const missile = unitShouldMissile(unit, unit.focus);
     unit.fireCooldown = 1 / (missile ? HELI_MISSILE_HZ : unit.fireRateHz);
@@ -1199,6 +1201,10 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
 
   function updateAgent(unit: SimUnit, dt: number): void {
     if (unit.destroyed) return;
+    // Cooldown always advances so leaving/re-entering range cannot reset or stall reload.
+    if (unit.fireCooldown > 0) {
+      unit.fireCooldown = Math.max(0, unit.fireCooldown - dt);
+    }
     unit.x += unit.knockVx * dt;
     unit.z += unit.knockVz * dt;
     unit.knockVx *= Math.exp(-8 * dt);
