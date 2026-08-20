@@ -37,7 +37,7 @@ export interface TurretHandle extends CombatEntity {
   dispose: () => void;
 }
 
-const TURRET_TURN_SPEED = 0.55;
+const TURRET_TURN_SPEED = 2.2;
 const TURRET_ALIGN_RAD = 0.06;
 const IDLE_YAW_LIMIT = Math.PI / 4; // ±45°
 const IDLE_TURN_SPEED = 0.22;
