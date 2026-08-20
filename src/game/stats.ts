@@ -70,7 +70,7 @@ export const MISSILE_SPLASH_RADIUS = 1.5;
 export const ACCURACY_AT_POINT_BLANK = 1;
 export const ACCURACY_AT_MAX_RANGE = 0.5;
 /** How far a miss lands from the aim point (world units). */
-export const MISS_SCATTER_RADIUS = 1.85;
+export const MISS_SCATTER_RADIUS = 0.925;
 
 /** Fixed map turrets: tank range, 2× rifle cadence, fixed damage, 2× tank HP. */
 export const TURRET_SHOOT_RANGE = UNIT_STATS.tank.shootRange * 1.25;
