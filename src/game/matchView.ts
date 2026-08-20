@@ -374,6 +374,12 @@ export function createMatchView(opts: {
             });
           }
         }
+      } else if (ev.type === "FlagCoin") {
+        if (ev.team === localTeam) {
+          const at = captureFlag.root.position.clone();
+          at.y += 2.2;
+          coinFx.spawn(at, ev.amount);
+        }
       } else if (ev.type === "TurretBounty") {
         if (ev.killer === localTeam) {
           const turret = turretById.get(ev.turretId);

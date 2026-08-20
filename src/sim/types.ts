@@ -90,6 +90,7 @@ export type MatchEvent =
   | { type: "ResearchComplete"; team: Team; id: UpgradeId }
   | { type: "TurretBounty"; turretId: number; killer: Team; amount: number }
   | { type: "TruckCoin"; unitId: number; team: Team; amount: number }
+  | { type: "FlagCoin"; team: Team; amount: number }
   | { type: "FlagOwnerChanged"; owner: Team | null }
   | { type: "MatchEnded"; winner: Team };
 

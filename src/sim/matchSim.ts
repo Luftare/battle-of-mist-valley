@@ -1645,6 +1645,11 @@ export function createMatchSim(opts: MatchSimOpts = {}): MatchSim {
           if (flagCoinCooldown <= 0) {
             flagCoinCooldown = 1;
             addCoins(flagOwner, FLAG_COINS_PER_SEC);
+            emit({
+              type: "FlagCoin",
+              team: flagOwner,
+              amount: FLAG_COINS_PER_SEC,
+            });
           }
         } else {
           flagCoinCooldown = 0;
