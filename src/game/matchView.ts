@@ -13,11 +13,14 @@ import {
 import { createHpBar, type HpBarHandle } from "./hpBar";
 import {
   BUILDING_HP_BAR_HEIGHT,
+  MISSILE_SPLASH_RADIUS,
+  TANK_SPLASH_RADIUS,
   TURRET_HP_BAR_HEIGHT,
   UNIT_STATS,
   type UnitKind,
 } from "./stats";
 import {
+  TANK_SPLASH_MUL,
   UPGRADE_DEFS,
   UPGRADE_IDS,
   upgradeCost,
@@ -145,6 +148,7 @@ export function createMatchView(opts: {
   const buildings = new Map<number, VisualBuilding>();
   const wrecks: BuildingHandle[] = [];
   const visualMissiles = new Map<number, MissileHandle>();
+  const missileOwners = new Map<number, { team: Team; fromX: number; fromZ: number }>();
   let lastSnap: MatchSnapshot | null = null;
   let researchModalOpen = false;
   let selectedSlot: ViewSlot | null = null;
@@ -272,6 +276,18 @@ export function createMatchView(opts: {
         duration: 0.55,
       });
       attacker?.playFireFx();
+      if (attacker) {
+        applySplashKnock(
+          attacker.root.position.x,
+          attacker.root.position.z,
+          ev.impactX,
+          ev.impactZ,
+          heavy ? TANK_SPLASH_RADIUS * TANK_SPLASH_MUL : TANK_SPLASH_RADIUS,
+          heavy ? 14 : 8.5,
+          attacker.team,
+          ev.didHit ? { kind: ev.targetKind, id: ev.targetId } : null,
+        );
+      }
       return;
     }
     if (ev.attackerKind === "turret") {
@@ -297,6 +313,52 @@ export function createMatchView(opts: {
       thickness: isHeliGun ? 0.08 : 0.07,
       color: isHeliGun ? "#ffe9a0" : "#fff8d8",
     });
+  }
+
+  /** Visual knock / lean matching sim splash knockback (view-only juice). */
+  function applySplashKnock(
+    fromX: number,
+    fromZ: number,
+    impactX: number,
+    impactZ: number,
+    radius: number,
+    strength: number,
+    attackerTeam: Team,
+    main: { kind: FocusKind; id: number } | null,
+  ): void {
+    for (const vis of units.values()) {
+      if (vis.unit.destroyed || vis.unit.team === attackerTeam) continue;
+      if (vis.unit.kind === "helicopter") continue;
+      const isMain = main?.kind === "unit" && main.id === vis.id;
+      if (
+        !isMain &&
+        Math.hypot(impactX - vis.unit.root.position.x, impactZ - vis.unit.root.position.z) >
+          radius
+      ) {
+        continue;
+      }
+      vis.unit.applyImpact(fromX, fromZ, isMain ? strength : strength * 0.55);
+    }
+    for (const vis of buildings.values()) {
+      if (vis.handle.destroyed || vis.team === attackerTeam) continue;
+      const isMain = main?.kind === "building" && main.id === vis.id;
+      const slot = slotOf(vis.team, vis.slotIndex);
+      if (!slot) continue;
+      if (!isMain && Math.hypot(impactX - slot.x, impactZ - slot.z) > radius) continue;
+      vis.handle.applyImpact(fromX, fromZ, isMain ? strength : strength * 0.55);
+    }
+    for (const [id, turret] of turretById) {
+      if (turret.destroyed || turret.team === attackerTeam) continue;
+      const isMain = main?.kind === "turret" && main.id === id;
+      if (
+        !isMain &&
+        Math.hypot(impactX - turret.root.position.x, impactZ - turret.root.position.z) >
+          radius
+      ) {
+        continue;
+      }
+      turret.applyImpact(fromX, fromZ, isMain ? strength : strength * 0.55);
+    }
   }
 
   function applyEvents(events: MatchEvent[]): void {
@@ -355,6 +417,11 @@ export function createMatchView(opts: {
           },
         );
         visualMissiles.set(ev.missileId, missile);
+        missileOwners.set(ev.missileId, {
+          team: heli?.team ?? localTeam,
+          fromX: ev.x,
+          fromZ: ev.z,
+        });
       } else if (ev.type === "MissileHit") {
         spawnExplosion(scene, new Vector3(ev.x, ev.y, ev.z), {
           scale: 1.55,
@@ -363,6 +430,20 @@ export function createMatchView(opts: {
         const m = visualMissiles.get(ev.missileId);
         m?.dispose();
         visualMissiles.delete(ev.missileId);
+        const owner = missileOwners.get(ev.missileId);
+        missileOwners.delete(ev.missileId);
+        if (owner) {
+          applySplashKnock(
+            owner.fromX,
+            owner.fromZ,
+            ev.x,
+            ev.z,
+            MISSILE_SPLASH_RADIUS,
+            8.5,
+            owner.team,
+            null,
+          );
+        }
       } else if (ev.type === "ResearchComplete") {
         if (ev.team === localTeam) hud.showUpgradeToast(UPGRADE_DEFS[ev.id].label);
       } else if (ev.type === "TruckCoin") {
@@ -673,6 +754,7 @@ export function createMatchView(opts: {
       wrecks.length = 0;
       for (const m of visualMissiles.values()) m.dispose();
       visualMissiles.clear();
+      missileOwners.clear();
     },
   };
 }
